@@ -170,8 +170,8 @@ def render_point_markdown(result: dict) -> str:
         "",
         "### 📊 当前状态",
         "",
-        f"- **路表温度**: **{temp_to_dual(cur['pavement_temp'])}**",
-        f"- 气温: {temp_to_dual(cur['air_temp'])}",
+        f"- **路表温度**: **{cur['pavement_temp']:.1f}°C**",
+        f"- 气温: {cur['air_temp']:.1f}°C",
         f"- 太阳辐射: {cur.get('gti_w_m2', 0):.0f} W/m²",
         f"- 模型置信度: `{cur.get('confidence', '?')}`",
         "",
@@ -185,14 +185,17 @@ def render_point_markdown(result: dict) -> str:
         "",
         "### 📅 未来 14 天路表温度峰值",
         "",
-        "| 日期 | 等级 | 峰值 (°C/F) | 时间 |",
-        "|------|------|-------------|------|",
+        "| 日期 | 等级 | 路表峰值 | 当天气温 | Δ差值 | 时间 |",
+        "|------|------|----------|----------|-------|------|",
     ]
     for d in peaks[:14]:
         lvl = classify_level_inline(d["peak_pavement_temp"])
         icon = LEVEL_ICONS[lvl]
+        c = d["peak_pavement_temp"]
+        a = d.get("peak_air_temp", 0)
+        delta = c - a
         lines.append(
-            f"| {d['date']} | {icon} | **{d['peak_pavement_temp']:.1f}°C / {d['peak_pavement_temp']*9/5+32:.1f}°F** | {d['peak_time'][11:16]} |"
+            f"| {d['date']} | {icon} | **{c:.1f}°C** | {a:.1f}°C | +{delta:.1f}°C | {d['peak_time'][11:16]} |"
         )
 
     # 高风险日

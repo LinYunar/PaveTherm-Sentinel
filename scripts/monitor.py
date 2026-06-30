@@ -34,7 +34,7 @@ sys.path.insert(0, str(SKILL_ROOT / "scripts"))
 from geocode import geocode
 from fetch_weather import fetch_open_meteo
 from model import compute_pavement_temp, compute_hourly_pavement, daily_peak
-from alert import classify_level, render_feishu_card, render_multi_point_card, temp_to_dual
+from alert import classify_level, render_feishu_card, render_multi_point_card
 
 # 历史遗留模块 (可能是旧版本写的) - 容错导入,失败不影响核心流程
 try:

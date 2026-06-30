@@ -78,11 +78,6 @@ def classify_level(pavement_temp: float, thresholds: dict | None = None) -> dict
     }
 
 
-def temp_to_dual(celsius: float) -> str:
-    fahrenheit = celsius * 9 / 5 + 32
-    return f"{celsius:.1f}°C / {fahrenheit:.1f}°F"
-
-
 # ====== 飞书 v1 卡片颜色映射 ======
 LEVEL_TO_TEMPLATE = {
     "green": "green",
@@ -131,13 +126,14 @@ def render_feishu_card(point: dict, current: dict, daily_peaks: list, alert_summ
     confidence = current.get("confidence", "?")
 
     # ====== 构造 14 天 markdown 表 (单点) ======
-    days_lines = ["| 日期 | 等级 | 峰值 (°C/F) | 时间 |", "|------|------|-------------|------|"]
+    days_lines = ["| 日期 | 等级 | 路表峰值 | 当天气温 | Δ差值 | 时间 |", "|------|------|----------|----------|-------|------|"]
     for p in daily_peaks[:14]:
         lvl = classify_level(p["peak_pavement_temp"])["level"]
         e = LEVEL_TO_EMOJI[lvl]
         c = p["peak_pavement_temp"]
-        f = c * 9 / 5 + 32
-        days_lines.append(f"| {p['date']} | {e} | **{c:.1f}°C / {f:.1f}°F** | {p['peak_time'][11:16]} |")
+        a = p.get("peak_air_temp", 0)
+        delta = c - a
+        days_lines.append(f"| {p['date']} | {e} | **{c:.1f}°C** | {a:.1f}°C | +{delta:.1f}°C | {p['peak_time'][11:16]} |")
     days_md = "\n".join(days_lines)
 
     # ====== 高风险日 (只显示橙红) ======
@@ -172,10 +168,10 @@ def render_feishu_card(point: dict, current: dict, daily_peaks: list, alert_summ
         "flex_mode": "stretch",
         "columns": [
             {"tag": "column", "width": "weighted", "weight": 1, "elements": [
-                {"tag": "div", "text": {"tag": "lark_md", "content": f"**路表温度**\n**{temp_to_dual(cur_pt)}**"}}
+                {"tag": "div", "text": {"tag": "lark_md", "content": f"**路表温度**\n**{cur_pt:.1f}°C**"}}
             ]},
             {"tag": "column", "width": "weighted", "weight": 1, "elements": [
-                {"tag": "div", "text": {"tag": "lark_md", "content": f"**气温**\n{temp_to_dual(cur_at)}"}}
+                {"tag": "div", "text": {"tag": "lark_md", "content": f"**气温**\n{cur_at:.1f}°C"}}
             ]},
             {"tag": "column", "width": "weighted", "weight": 1, "elements": [
                 {"tag": "div", "text": {"tag": "lark_md", "content": f"**太阳辐射**\n{current.get('gti_w_m2', 0):.0f} W/m²"}}
@@ -233,13 +229,12 @@ def render_feishu_card(point: dict, current: dict, daily_peaks: list, alert_summ
             lvl = classify_level(d["peak_pavement_temp"])["level"]
             e = LEVEL_TO_EMOJI[lvl]
             c = d["peak_pavement_temp"]
-            f = c * 9 / 5 + 32
             columns.append({
                 "tag": "column",
                 "width": "weighted",
                 "weight": 1,
                 "elements": [
-                    {"tag": "div", "text": {"tag": "lark_md", "content": f"**{d['date']}** {e}\n**{c:.1f}°C / {f:.1f}°F**\n峰值 {d['peak_time'][11:16]}"}}
+                    {"tag": "div", "text": {"tag": "lark_md", "content": f"**{d['date']}** {e}\n**{c:.1f}°C**\n峰值 {d['peak_time'][11:16]}"}}
                 ]
             })
         if columns:
