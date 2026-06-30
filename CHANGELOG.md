@@ -195,97 +195,24 @@ v0.1.1 取代 v0.1.0，commit hash 不同。**请使用 v0.1.1**。
 
 ---
 
-## [v0.2.0] - 2026-06-30 · 数据一致性 + 渲染修复 + 35 条 Pitfall 体系化
+## [v0.2.0] - 2026-06-30 · 渲染一致性 + 数据保护强化
 
-### 🎯 用户反馈驱动的修复 (来自 6/30 session 实战)
+### Added
 
-#### 1. **14 天表加 "路表峰值 | 当天气温 | Δ差值" 三列**
+- 14 天预测表新增"当天气温"和"Δ差值"两列，方便查看辐射升温贡献
+- `SKILL.md` 新增 18 条 Pitfall (Pitfall 18-35)，覆盖配置/渲染/数据真实度等常见陷阱
 
-**触发**: 用户问"为什么 07-10 气温比 07-06 低 1.6°C，路表反而高 0.6°C" — 卡片没显示气温，无法自查反常。
+### Changed
 
-**修复**:
-- `scripts/alert.py:131-137` — 真卡片 (interactive card) 14 天表头 + 行内加 3 列
-- `scripts/feishu_push.py:185-198` — markdown 降级路径同步加 3 列 (Pitfall 31 命中)
+- 温度显示统一为单 °C 单位（移除 `temp_to_dual()` 硬编码双单位）
+- `feishu_push.py` 的 markdown 渲染器与 `alert.py` 真卡片渲染器字段对齐
 
-**物理解释** (新增 Pitfall 34): 路表温度公式 `T_pav = T_air + 0.035×GTI + 颜色项 + 老化 − 0.5×风速`。**风速是路表反常的常见根因**——07-06 风速 6.6 m/s vs 07-10 风速 0.2 m/s，风冷差 3.2°C 抵消并反超辐射差 -0.9°C。
+### Fixed
 
-#### 2. **删 °F 双单位，硬编码 → config 驱动**
+- `feishu_push.py:render_point_markdown()` 与 `alert.py:render_feishu_card()` 渲染字段不同步（修改真卡片渲染器后 markdown 降级路径未同步）
+- `.gitignore` 未拦截 `monitoring_points.yaml.bak-*` 备份文件（可能含历史 GPS 数据）
+- `.gitignore` 未拦截 `user-real-points.yaml`（用户个人点位数据）
 
-**触发**: 用户反馈"卡片是 °C/°F 双单位，我要 °C"。根因：config `prefer_both=false` 没生效，4 个渲染器 hardcode `temp_to_dual()`。
+### Security
 
-**修复**:
-- `temp_to_dual()` 函数定义保留作向后兼容
-- 所有调用点 (`alert.py:172-173` + `feishu_push.py:173-174/195` + `monitor.py:37`) 改用单 `°C`
-
-#### 3. **feishu_push.py: 渲染器分家陷阱修复 (Pitfall 31)**
-
-**触发**: 改了 `alert.py:render_feishu_card` 加气温列，但用户没看到——因为 `push_point` 走的是 `feishu_push.py:155 render_point_markdown` 独立渲染函数，**不调 alert.py**。
-
-**强约束**: 改任何字段显示（温度单位/列名/14 天表 header）**必须 grep 全 4 个渲染器全部同步**。
-
-#### 4. **data/monitoring_points.yaml 加入 .gitignore (数据保护升级)**
-
-**触发**: v0.1.1 已加但仍有 `.bak-*` 备份残留 + `user-real-points.yaml` 用户数据未 ignore。
-
-**修复**:
-```gitignore
-data/monitoring_points.yaml              # 用户运行时数据
-data/monitoring_points.yaml.bak-*        # 备份文件含 GPS
-user-real-points.yaml                    # 用户个人数据
-*.bak / *.backup                          # 兜底
-```
-
-### 📚 SKILL.md 补全 18 条 Pitfall (18 → 35)
-
-之前 v0.1.1 的 SKILL.md 只到 Pitfall 17，Pitfall 18-35 **全是 hermes 系统副本独有的，从没 push 到 git**。本次一次性补齐:
-
-| # | 主题 | 触发事件 |
-|---|---|---|
-| 18 | config 字段不写 reader = 不生效 | `output.temperature_unit` 写了没 reader，4 渲染器硬编码 °C/°F |
-| 19 | 改卡片字段后必跑端到端 3 步验证 | alert.py 加列，feishu_push.py header 没改 |
-| 20 | 卡片类型和用户需求要匹配 | "要 14 天"推批量卡片（不含 14 天表），用户质问"数据呢" |
-| 21 | 时间窗口硬限制要明说 | "未来 30 天"无法预测（API 上限 16），告知 + 给 14 天 |
-| 22 | enrich 不能覆盖 CONFIRMED | 手填 5.0 被 enrich 改成 0（已修：顶部守卫）|
-| 23 | Tavily 搜路名返回同名无关实体 | "成都东大路"→地铁规划；"成都琴台路"→JICA PDF 26 年 |
-| 24 | 数据真实度铁律 + 4 档 verdict | 必走 Tavily + 搜不到默认 5 年 + 卡片 4 档 (✓真实/⚠️估计/❓默认/?未知) |
-| 25 | enrich apply 写 6 个字段 | 只写值不写 source/confidence，卡片显示 ?未知 |
-| 26 | JTG F40 颜色分段修正 | ≤5 black / ≤10 gray / >10 light_gray |
-| 27 | 用户问"真不真"必须 1 分钟答 | 必须有可追溯链路 (字段值 + _source + _confidence) |
-| 28 | 报"全部成功"前先数实物 | "10 个点"实际 yaml 只有 3 个，推 7 张假卡片 (4 字真言冲突) |
-| 29 | 不要"等等"工作流铁律 | 4 条铁律 (一次到位 / 用户拍板后就做 / 结果先于过程 / 不说"等等") |
-| 30 | enrich 出问题 3 根因 | Tavily 外部限制 + 兜底 bug + CONFIRMED 守卫缺失 |
-| 31 | feishu_push.py 独立渲染器 | 改字段必同步 4 渲染器 (本次修复直接命中) |
-| 32 | Tavily 调了 ≠ 调对了 | curl 实测 200 但搜错实体 (世运会)，4 字真言扩展 |
-| 33 | SKILL.md 自我宣称 ≠ 代码真修 | "已修复" 没数实物，加第 5 字真言"先数实物再宣告" |
-| 34 | 风速是路表反常根因 | 公式物理解释 + 4 反常场景诊断表 |
-| 35 | Tavily 主搜失败 ≠ 无数据 | 兜底搜保留证据 (龙舟路 1998 人民网) |
-
-### 🆕 数据真实度实战案例 (不入仓, 仅 SKILL.md 记录)
-
-| 点位 | 路名 | 真实年龄 | 来源 | 置信度 |
-|---|---|---|---|---|
-| pt_longzhoulu_demo | 成都锦江区龙舟路 | 28 年 | Tavily (1998 建成, 人民网四川频道) | SPECULATIVE |
-| pt_youloujie_demo | 成都锦江区油篓街 | 2 年 | Tavily (2023 改造, sc.people.com.cn) | SPECULATIVE |
-| pt_sanselu_demo | 成都锦江区三色路 | 5 年 | DEFAULT (Tavily 搜"三色路"→"三环路"错配) | DEFAULT |
-
-### ✅ 推送验证
-
-- 龙舟路: message_id `om_x100b6b0c66fc14b4c43c1fa41bc2f0f` (含 14 天新列)
-- 油篓街: message_id `om_x100b6b0c19ff0144c10fd3669d18357`
-- 三色路: message_id `om_x100b6b0cc8d60084c49eb05df3288a3`
-
-### 🎓 4 字真言扩展为 5 字
-
-1. **一步一步** — 不变
-2. **留好退路** — 不变
-3. **不说谎** — 扩展：含"SKILL.md 不能写代码没真做的事"
-4. **负责任** — 扩展：含"对 SKILL.md 真实性负责"
-5. **先数实物再宣告** (NEW) — 改完任何东西必跑自检命令看到实物才能写"已修复"
-
-### 📊 commit 信息
-
-- commit: `4339876`
-- 文件: SKILL.md + alert.py + feishu_push.py + monitor.py
-- 行数: +227 / -21
-- base: v0.1.1 (`2631782`)
-- 敏感数据: 0 泄露（.gitignore 生效）
+- 强化监测点数据保护：所有含 GPS 的 yaml 文件及备份加入 `.gitignore`
