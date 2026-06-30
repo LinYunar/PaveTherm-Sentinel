@@ -2,7 +2,29 @@
 
 > 🌡️ 沥青路面高温监测与预警 · Open-Meteo + 路表温度模型 + 飞书卡片推送
 
+![Version](https://img.shields.io/badge/version-v0.2.0-blue)
+![Last Updated](https://img.shields.io/badge/last_updated-2026--06--30-green)
+![Data Safety](https://img.shields.io/badge/data--safety-.gitignore--protected-orange)
+
 全球任意坐标的沥青路面监测点管理 + 未来 14 天路表温度预测 + 超阈值高温预警。
+
+## 📋 版本更新
+
+| 版本 | 日期 | 主题 | 详情 |
+|---|---|---|---|
+| **v0.2.0** | 2026-06-30 | 数据一致性 + 渲染修复 + 35 条 Pitfall 体系化 | [CHANGELOG](CHANGELOG.md#v020---2026-06-30--数据一致性--渲染修复--35-条-pitfall-体系化) |
+| v0.1.1 | 2026-06-30 | 安全重建 + 性能优化 + Bug 修复 | [CHANGELOG](CHANGELOG.md#v011---2026-06-30--安全重建--性能优化--bug-修复) |
+| v0.1.0 | 2026-06-30 | ~~已废弃~~ 数据泄露, 删库重建 | [CHANGELOG](CHANGELOG.md#v010---2026-06-30-历史--已废弃) |
+
+### v0.2.0 主要修复 (用户反馈驱动)
+
+1. **14 天表加 "路表峰值 / 当天气温 / Δ差值" 三列** — 用户问"气温低路表高"无法自查
+2. **删 °F 双单位** — config `prefer_both=false` 没生效, 4 渲染器 hardcode
+3. **feishu_push.py 渲染器分家陷阱修复** — 改 alert.py 没用, 必须同步改 4 个渲染器
+4. **.gitignore 数据保护升级** — monitoring_points.yaml.bak-* + user-real-points.yaml 加入 ignore
+5. **SKILL.md 补全 Pitfall 18-35** (18 条新) — 之前 v0.1.1 只到 17, 18-35 从没 push
+
+详见 [CHANGELOG.md](CHANGELOG.md) 完整 v0.2.0 章节.
 
 ---
 
