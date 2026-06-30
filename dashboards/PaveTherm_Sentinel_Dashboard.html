@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🌡️ PaveTherm Sentinel · 沥青路表温度监测</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<style>
+:root {
+  --bg-primary: #0a0e14;
+  --bg-secondary: #131820;
+  --bg-card: #1a2028;
+  --bg-hover: #232b36;
+  --border: #2a3441;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b96a5;
+  --text-muted: #5c6773;
+  --accent: #5e9bff;
+  --green: #3fb950;
+  --yellow: #d29922;
+  --orange: #f0883e;
+  --red: #f85149;
+  --shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 1.5;
+  min-height: 100vh;
+}
+.header {
+  background: linear-gradient(135deg, #1a2028 0%, #131820 100%);
+  border-bottom: 1px solid var(--border);
+  padding: 24px 32px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.header h1 {
+  font-size: 22px;
+  font-weight: 600;
+  background: linear-gradient(90deg, #5e9bff, #d29922);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.header .meta { color: var(--text-muted); font-size: 13px; }
+.stats {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 16px;
+  padding: 24px 32px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+}
+.stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 20px;
+  position: relative;
+  overflow: hidden;
+}
+.stat-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 3px;
+  height: 100%;
+  background: var(--accent);
+}
+.stat-card.red::before { background: var(--red); }
+.stat-card.orange::before { background: var(--orange); }
+.stat-card.yellow::before { background: var(--yellow); }
+.stat-card.green::before { background: var(--green); }
+.stat-card .label { font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
+.stat-card .value { font-size: 32px; font-weight: 700; margin-top: 4px; }
+.stat-card .value.red { color: var(--red); }
+.stat-card .value.orange { color: var(--orange); }
+.stat-card .value.yellow { color: var(--yellow); }
+.stat-card .value.green { color: var(--green); }
+.main {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 16px;
+  padding: 24px 32px;
+}
+.panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+.panel-header {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.panel-header h2 { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.panel-header .tag { font-size: 11px; padding: 2px 8px; border-radius: 4px; background: var(--bg-hover); color: var(--text-secondary); }
+#map { height: 520px; background: #0a0e14; }
+.table-panel { padding: 0; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+thead { background: var(--bg-secondary); }
+th { text-align: left; padding: 12px 16px; font-weight: 500; color: var(--text-secondary); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); }
+td { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+tbody tr:hover { background: var(--bg-hover); }
+.level-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.level-badge.green { background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid rgba(63,185,80,0.3); }
+.level-badge.yellow { background: rgba(210,153,34,0.15); color: var(--yellow); border: 1px solid rgba(210,153,34,0.3); }
+.level-badge.orange { background: rgba(240,136,62,0.15); color: var(--orange); border: 1px solid rgba(240,136,62,0.3); }
+.level-badge.red { background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid rgba(248,81,73,0.3); }
+.temp-cell { font-variant-numeric: tabular-nums; }
+.temp-cell .c { font-weight: 600; }
+.temp-cell .f { color: var(--text-muted); font-size: 11px; margin-left: 4px; }
+.name-cell { cursor: pointer; }
+.name-cell:hover { color: var(--accent); }
+.footer {
+  padding: 16px 32px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+  background: var(--bg-secondary);
+}
+.dot {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+.dot.green { background: var(--green); }
+.dot.yellow { background: var(--yellow); }
+.dot.orange { background: var(--orange); }
+.dot.red { background: var(--red); }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>🌡️ PaveTherm Sentinel · 沥青路表温度监测</h1>
+  <div class="meta">生成时间: <span id="gen-time"></span> · 数据源: Open-Meteo + 高德地图</div>
+</div>
+
+<div class="stats">
+  <div class="stat-card">
+    <div class="label">总监测点</div>
+    <div class="value" id="stat-total">-</div>
+  </div>
+  <div class="stat-card green">
+    <div class="label"><span class="dot green"></span>绿色 (正常)</div>
+    <div class="value green" id="stat-green">-</div>
+  </div>
+  <div class="stat-card yellow">
+    <div class="label"><span class="dot yellow"></span>黄色 (注意)</div>
+    <div class="value yellow" id="stat-yellow">-</div>
+  </div>
+  <div class="stat-card orange">
+    <div class="label"><span class="dot orange"></span>橙色 (警戒)</div>
+    <div class="value orange" id="stat-orange">-</div>
+  </div>
+  <div class="stat-card red">
+    <div class="label"><span class="dot red"></span>红色 (危险)</div>
+    <div class="value red" id="stat-red">-</div>
+  </div>
+</div>
+
+<div class="main">
+  <div class="panel">
+    <div class="panel-header">
+      <h2>📍 监测点地图</h2>
+      <span class="tag">Leaflet + OpenStreetMap</span>
+    </div>
+    <div id="map"></div>
+  </div>
+  <div class="panel">
+    <div class="panel-header">
+      <h2>📈 14 天路表温度预测</h2>
+      <span class="tag">ECharts</span>
+    </div>
+    <div id="chart" style="height: 520px;"></div>
+  </div>
+</div>
+
+<div class="main" style="grid-template-columns: 1fr;">
+  <div class="panel table-panel">
+    <div class="panel-header">
+      <h2>📋 监测点列表</h2>
+      <span class="tag" id="pts-count">-</span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>等级</th>
+          <th>监测点</th>
+          <th>路面</th>
+          <th>当前路表</th>
+          <th>14天峰值</th>
+          <th>预警</th>
+        </tr>
+      </thead>
+      <tbody id="pts-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="footer">
+  PaveTherm Sentinel v0.1 · 模型: SHRP/LTPP 经验公式 (参数偏保守) · 14 天预报每小时更新
+</div>
+
+<script>
+// ====== 数据 (由 dashboard.py 注入) ======
+const DATA = {"summary": {"total": 6, "red": 0, "orange": 0, "yellow": 0, "green": 6, "generated_at": "2026-06-30 09:49:02"}, "points": [{"id": "cd_chengyulukou_001", "name": "成都三环路-成渝立交", "lat": 30.634401, "lon": 104.151602, "display": "四川省成都市成华区成渝立交", "pavement_color": "unknown", "pavement_age_years": null, "current_pavement_c": 45.6, "current_pavement_f": 114.1, "current_air_c": 25.2, "alert_level": "green", "alert_label": "✅ 绿-正常", "peak_14d_max_c": 75.3, "peak_14d": [{"date": "2026-06-30", "peak_c": 44.3, "peak_f": 111.7, "time": "16:00", "level": "green"}, {"date": "2026-07-01", "peak_c": 52.2, "peak_f": 126.0, "time": "16:00", "level": "green"}, {"date": "2026-07-02", "peak_c": 53.3, "peak_f": 127.9, "time": "16:00", "level": "green"}, {"date": "2026-07-03", "peak_c": 62.9, "peak_f": 145.2, "time": "13:00", "level": "orange"}, {"date": "2026-07-04", "peak_c": 66.7, "peak_f": 152.1, "time": "14:00", "level": "red"}, {"date": "2026-07-05", "peak_c": 67.1, "peak_f": 152.8, "time": "13:00", "level": "red"}, {"date": "2026-07-06", "peak_c": 70.2, "peak_f": 158.4, "time": "14:00", "level": "red"}, {"date": "2026-07-07", "peak_c": 68.0, "peak_f": 154.4, "time": "14:00", "level": "red"}, {"date": "2026-07-08", "peak_c": 63.6, "peak_f": 146.5, "time": "14:00", "level": "orange"}, {"date": "2026-07-09", "peak_c": 67.5, "peak_f": 153.5, "time": "14:00", "level": "red"}, {"date": "2026-07-10", "peak_c": 65.8, "peak_f": 150.4, "time": "14:00", "level": "red"}, {"date": "2026-07-11", "peak_c": 60.4, "peak_f": 140.7, "time": "14:00", "level": "orange"}, {"date": "2026-07-12", "peak_c": 73.0, "peak_f": 163.4, "time": "14:00", "level": "red"}, {"date": "2026-07-13", "peak_c": 75.3, "peak_f": 167.5, "time": "14:00", "level": "red"}]}, {"id": "pt_4713a920", "name": "成都春熙路", "lat": 30.657952, "lon": 104.078643, "display": "四川省成都市锦江区春熙路", "pavement_color": "unknown", "pavement_age_years": null, "current_pavement_c": 46.0, "current_pavement_f": 114.8, "current_air_c": 25.6, "alert_level": "green", "alert_label": "✅ 绿-正常", "peak_14d_max_c": 75.3, "peak_14d": [{"date": "2026-06-30", "peak_c": 45.8, "peak_f": 114.4, "time": "16:00", "level": "green"}, {"date": "2026-07-01", "peak_c": 53.1, "peak_f": 127.6, "time": "16:00", "level": "green"}, {"date": "2026-07-02", "peak_c": 57.3, "peak_f": 135.1, "time": "16:00", "level": "yellow"}, {"date": "2026-07-03", "peak_c": 63.4, "peak_f": 146.1, "time": "14:00", "level": "orange"}, {"date": "2026-07-04", "peak_c": 67.7, "peak_f": 153.9, "time": "14:00", "level": "red"}, {"date": "2026-07-05", "peak_c": 66.3, "peak_f": 151.3, "time": "13:00", "level": "red"}, {"date": "2026-07-06", "peak_c": 69.3, "peak_f": 156.7, "time": "14:00", "level": "red"}, {"date": "2026-07-07", "peak_c": 69.2, "peak_f": 156.6, "time": "14:00", "level": "red"}, {"date": "2026-07-08", "peak_c": 64.6, "peak_f": 148.3, "time": "14:00", "level": "orange"}, {"date": "2026-07-09", "peak_c": 67.5, "peak_f": 153.5, "time": "14:00", "level": "red"}, {"date": "2026-07-10", "peak_c": 65.5, "peak_f": 149.9, "time": "14:00", "level": "red"}, {"date": "2026-07-11", "peak_c": 60.2, "peak_f": 140.4, "time": "15:00", "level": "orange"}, {"date": "2026-07-12", "peak_c": 72.4, "peak_f": 162.3, "time": "14:00", "level": "red"}, {"date": "2026-07-13", "peak_c": 75.3, "peak_f": 167.5, "time": "14:00", "level": "red"}]}, {"id": "pt_479417cd", "name": "成都宽窄巷子", "lat": 30.663213, "lon": 104.05518, "display": "四川省成都市青羊区宽窄巷子", "pavement_color": "unknown", "pavement_age_years": null, "current_pavement_c": 49.0, "current_pavement_f": 120.2, "current_air_c": 25.6, "alert_level": "green", "alert_label": "✅ 绿-正常", "peak_14d_max_c": 74.6, "peak_14d": [{"date": "2026-06-30", "peak_c": 49.0, "peak_f": 120.2, "time": "16:00", "level": "green"}, {"date": "2026-07-01", "peak_c": 52.2, "peak_f": 126.0, "time": "16:00", "level": "green"}, {"date": "2026-07-02", "peak_c": 55.1, "peak_f": 131.2, "time": "16:00", "level": "yellow"}, {"date": "2026-07-03", "peak_c": 64.7, "peak_f": 148.5, "time": "14:00", "level": "orange"}, {"date": "2026-07-04", "peak_c": 67.2, "peak_f": 153.0, "time": "14:00", "level": "red"}, {"date": "2026-07-05", "peak_c": 67.1, "peak_f": 152.8, "time": "13:00", "level": "red"}, {"date": "2026-07-06", "peak_c": 72.2, "peak_f": 162.0, "time": "14:00", "level": "red"}, {"date": "2026-07-07", "peak_c": 70.6, "peak_f": 159.1, "time": "14:00", "level": "red"}, {"date": "2026-07-08", "peak_c": 64.4, "peak_f": 147.9, "time": "14:00", "level": "orange"}, {"date": "2026-07-09", "peak_c": 66.9, "peak_f": 152.4, "time": "14:00", "level": "red"}, {"date": "2026-07-10", "peak_c": 66.8, "peak_f": 152.2, "time": "14:00", "level": "red"}, {"date": "2026-07-11", "peak_c": 61.3, "peak_f": 142.3, "time": "15:00", "level": "orange"}, {"date": "2026-07-12", "peak_c": 72.8, "peak_f": 163.0, "time": "14:00", "level": "red"}, {"date": "2026-07-13", "peak_c": 74.6, "peak_f": 166.3, "time": "14:00", "level": "red"}]}, {"id": "pt_e321022c", "name": "成都武侯祠", "lat": 30.644137, "lon": 104.047963, "display": "四川省成都市武侯区武侯祠(公交站)", "pavement_color": "unknown", "pavement_age_years": null, "current_pavement_c": 49.0, "current_pavement_f": 120.2, "current_air_c": 25.6, "alert_level": "green", "alert_label": "✅ 绿-正常", "peak_14d_max_c": 74.6, "peak_14d": [{"date": "2026-06-30", "peak_c": 49.0, "peak_f": 120.2, "time": "16:00", "level": "green"}, {"date": "2026-07-01", "peak_c": 52.2, "peak_f": 126.0, "time": "16:00", "level": "green"}, {"date": "2026-07-02", "peak_c": 55.1, "peak_f": 131.2, "time": "16:00", "level": "yellow"}, {"date": "2026-07-03", "peak_c": 64.7, "peak_f": 148.5, "time": "14:00", "level": "orange"}, {"date": "2026-07-04", "peak_c": 67.2, "peak_f": 153.0, "time": "14:00", "level": "red"}, {"date": "2026-07-05", "peak_c": 67.1, "peak_f": 152.8, "time": "13:00", "level": "red"}, {"date": "2026-07-06", "peak_c": 72.2, "peak_f": 162.0, "time": "14:00", "level": "red"}, {"date": "2026-07-07", "peak_c": 70.6, "peak_f": 159.1, "time": "14:00", "level": "red"}, {"date": "2026-07-08", "peak_c": 64.4, "peak_f": 147.9, "time": "14:00", "level": "orange"}, {"date": "2026-07-09", "peak_c": 66.9, "peak_f": 152.4, "time": "14:00", "level": "red"}, {"date": "2026-07-10", "peak_c": 66.8, "peak_f": 152.2, "time": "14:00", "level": "red"}, {"date": "2026-07-11", "peak_c": 61.3, "peak_f": 142.3, "time": "15:00", "level": "orange"}, {"date": "2026-07-12", "peak_c": 72.8, "peak_f": 163.0, "time": "14:00", "level": "red"}, {"date": "2026-07-13", "peak_c": 74.6, "peak_f": 166.3, "time": "14:00", "level": "red"}]}, {"id": "pt_38b9cad7", "name": "成都三环路刃具立交", "lat": 30.685632, "lon": 104.101964, "display": "四川省成都市成华区刃具立交", "pavement_color": "unknown", "pavement_age_years": null, "current_pavement_c": 46.0, "current_pavement_f": 114.8, "current_air_c": 25.6, "alert_level": "green", "alert_label": "✅ 绿-正常", "peak_14d_max_c": 75.3, "peak_14d": [{"date": "2026-06-30", "peak_c": 45.8, "peak_f": 114.4, "time": "16:00", "level": "green"}, {"date": "2026-07-01", "peak_c": 53.1, "peak_f": 127.6, "time": "16:00", "level": "green"}, {"date": "2026-07-02", "peak_c": 57.3, "peak_f": 135.1, "time": "16:00", "level": "yellow"}, {"date": "2026-07-03", "peak_c": 63.4, "peak_f": 146.1, "time": "14:00", "level": "orange"}, {"date": "2026-07-04", "peak_c": 67.7, "peak_f": 153.9, "time": "14:00", "level": "red"}, {"date": "2026-07-05", "peak_c": 66.3, "peak_f": 151.3, "time": "13:00", "level": "red"}, {"date": "2026-07-06", "peak_c": 69.3, "peak_f": 156.7, "time": "14:00", "level": "red"}, {"date": "2026-07-07", "peak_c": 69.2, "peak_f": 156.6, "time": "14:00", "level": "red"}, {"date": "2026-07-08", "peak_c": 64.6, "peak_f": 148.3, "time": "14:00", "level": "orange"}, {"date": "2026-07-09", "peak_c": 67.5, "peak_f": 153.5, "time": "14:00", "level": "red"}, {"date": "2026-07-10", "peak_c": 65.5, "peak_f": 149.9, "time": "14:00", "level": "red"}, {"date": "2026-07-11", "peak_c": 60.2, "peak_f": 140.4, "time": "15:00", "level": "orange"}, {"date": "2026-07-12", "peak_c": 72.4, "peak_f": 162.3, "time": "14:00", "level": "red"}, {"date": "2026-07-13", "peak_c": 75.3, "peak_f": 167.5, "time": "14:00", "level": "red"}]}, {"id": "pt_7e7f8a84", "name": "成都双流国际机场高速公路", "lat": 30.574884, "lon": 103.92342, "display": "四川省成都市双流区", "pavement_color": "unknown", "pavement_age_years": null, "current_pavement_c": 49.8, "current_pavement_f": 121.6, "current_air_c": 24.8, "alert_level": "green", "alert_label": "✅ 绿-正常", "peak_14d_max_c": 75.2, "peak_14d": [{"date": "2026-06-30", "peak_c": 49.8, "peak_f": 121.6, "time": "16:00", "level": "green"}, {"date": "2026-07-01", "peak_c": 48.5, "peak_f": 119.3, "time": "16:00", "level": "green"}, {"date": "2026-07-02", "peak_c": 50.5, "peak_f": 122.9, "time": "16:00", "level": "green"}, {"date": "2026-07-03", "peak_c": 63.9, "peak_f": 147.0, "time": "13:00", "level": "orange"}, {"date": "2026-07-04", "peak_c": 64.2, "peak_f": 147.6, "time": "14:00", "level": "orange"}, {"date": "2026-07-05", "peak_c": 65.8, "peak_f": 150.4, "time": "14:00", "level": "red"}, {"date": "2026-07-06", "peak_c": 68.9, "peak_f": 156.0, "time": "14:00", "level": "red"}, {"date": "2026-07-07", "peak_c": 69.7, "peak_f": 157.5, "time": "14:00", "level": "red"}, {"date": "2026-07-08", "peak_c": 64.8, "peak_f": 148.6, "time": "14:00", "level": "orange"}, {"date": "2026-07-09", "peak_c": 67.5, "peak_f": 153.5, "time": "14:00", "level": "red"}, {"date": "2026-07-10", "peak_c": 66.7, "peak_f": 152.1, "time": "14:00", "level": "red"}, {"date": "2026-07-11", "peak_c": 62.1, "peak_f": 143.8, "time": "14:00", "level": "orange"}, {"date": "2026-07-12", "peak_c": 73.1, "peak_f": 163.6, "time": "14:00", "level": "red"}, {"date": "2026-07-13", "peak_c": 75.2, "peak_f": 167.4, "time": "14:00", "level": "red"}]}]};
+
+// ====== 统计卡片 ======
+document.getElementById('stat-total').textContent = DATA.summary.total;
+document.getElementById('stat-green').textContent = DATA.summary.green;
+document.getElementById('stat-yellow').textContent = DATA.summary.yellow;
+document.getElementById('stat-orange').textContent = DATA.summary.orange;
+document.getElementById('stat-red').textContent = DATA.summary.red;
+document.getElementById('gen-time').textContent = DATA.summary.generated_at;
+document.getElementById('pts-count').textContent = `共 ${DATA.summary.total} 个点位`;
+
+// ====== 地图 ======
+const map = L.map('map', {zoomControl: true}).setView([30.65, 104.07], 11);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '© OpenStreetMap'
+}).addTo(map);
+
+const levelColors = {green: '#3fb950', yellow: '#d29922', orange: '#f0883e', red: '#f85149'};
+const markers = {};
+DATA.points.forEach(p => {
+  const color = levelColors[p.alert_level];
+  const html = `<div style="
+    background: ${color};
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    border: 3px solid #fff;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 700; font-size: 11px;
+    font-family: -apple-system, sans-serif;
+  ">${p.current_pavement_c.toFixed(0)}</div>`;
+  const icon = L.divIcon({html, className: 'pt-marker', iconSize: [28, 28], iconAnchor: [14, 14]});
+  const marker = L.marker([p.lat, p.lon], {icon}).addTo(map);
+  marker.bindPopup(`
+    <div style="font-family: -apple-system; min-width: 200px;">
+      <div style="font-weight: 600; font-size: 14px; margin-bottom: 6px;">${p.name}</div>
+      <div style="color: #666; font-size: 11px; margin-bottom: 8px;">${p.display}</div>
+      <div style="font-size: 12px;">
+        当前路表: <b style="color: ${color};">${p.current_pavement_c}°C / ${p.current_pavement_f}°F</b><br>
+        14天峰值: ${p.peak_14d_max_c}°C<br>
+        等级: <span style="color: ${color};">${p.alert_label}</span>
+      </div>
+    </div>
+  `);
+  markers[p.id] = marker;
+});
+
+// 自适应 bounds
+if (DATA.points.length > 0) {
+  const bounds = L.latLngBounds(DATA.points.map(p => [p.lat, p.lon]));
+  map.fitBounds(bounds.pad(0.2));
+}
+
+// ====== 14天图表 ======
+const chart = echarts.init(document.getElementById('chart'), 'dark');
+const allDates = [...new Set(DATA.points.flatMap(p => p.peak_14d.map(d => d.date)))].sort();
+const series = DATA.points.map(p => ({
+  name: p.name,
+  type: 'line',
+  smooth: true,
+  symbol: 'circle',
+  symbolSize: 6,
+  data: allDates.map(d => {
+    const day = p.peak_14d.find(x => x.date === d);
+    return day ? day.peak_c : null;
+  }),
+  itemStyle: {color: levelColors[p.alert_level]},
+  lineStyle: {width: 2, color: levelColors[p.alert_level]},
+  emphasis: {focus: 'series'},
+  markLine: p.alert_level === 'red' ? {
+    silent: true,
+    symbol: 'none',
+    lineStyle: {color: '#f85149', type: 'dashed', width: 1},
+    data: [{yAxis: 65, label: {formatter: '红警 65°C', color: '#f85149', fontSize: 10}}]
+  } : undefined,
+}));
+chart.setOption({
+  backgroundColor: 'transparent',
+  tooltip: {trigger: 'axis', axisPointer: {type: 'cross'}, valueFormatter: v => v ? `${v}°C` : '-'},
+  legend: {type: 'scroll', top: 0, textStyle: {color: '#8b96a5', fontSize: 11}},
+  grid: {left: 50, right: 20, top: 40, bottom: 50},
+  xAxis: {type: 'category', data: allDates, axisLabel: {color: '#8b96a5', fontSize: 10, rotate: 30}, axisLine: {lineStyle: {color: '#2a3441'}}},
+  yAxis: {type: 'value', name: '°C', nameTextStyle: {color: '#8b96a5'}, axisLabel: {color: '#8b96a5', formatter: '{value}°C'}, splitLine: {lineStyle: {color: '#2a3441'}}, max: 90},
+  series: series,
+});
+
+// ====== 表格 ======
+const tbody = document.getElementById('pts-tbody');
+const levelOrder = {red:0, orange:1, yellow:2, green:3};
+[...DATA.points].sort((a,b) => levelOrder[a.alert_level] - levelOrder[b.alert_level] || b.current_pavement_c - a.current_pavement_c).forEach(p => {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><span class="level-badge ${p.alert_level}">${p.alert_label}</span></td>
+    <td class="name-cell" data-id="${p.id}">
+      <div style="font-weight: 500;">${p.name}</div>
+      <div style="color: var(--text-muted); font-size: 11px;">${p.display || ''}</div>
+    </td>
+    <td>${p.pavement_color} · ${p.pavement_age_years || '?'}年</td>
+    <td class="temp-cell"><span class="c" style="color: ${levelColors[p.alert_level]};">${p.current_pavement_c}°C</span><span class="f">/ ${p.current_pavement_f}°F</span></td>
+    <td class="temp-cell"><span class="c">${p.peak_14d_max_c}°C</span><span class="f">/ ${(p.peak_14d_max_c*9/5+32).toFixed(1)}°F</span></td>
+    <td><span class="level-badge ${p.alert_level}">${p.alert_level.toUpperCase()}</span></td>
+  `;
+  tbody.appendChild(tr);
+});
+document.querySelectorAll('.name-cell').forEach(el => {
+  el.addEventListener('click', () => {
+    const id = el.dataset.id;
+    if (markers[id]) { map.setView(markers[id].getLatLng(), 15); markers[id].openPopup(); }
+  });
+});
+
+window.addEventListener('resize', () => chart.resize());
+</script>
+</body>
+</html>

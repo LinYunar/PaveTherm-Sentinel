@@ -1,0 +1,72 @@
+# PaveTherm Sentinel - 监测点元数据模板
+# 用法: cp monitoring_points.template.yaml data/monitoring_points.yaml
+#       然后按需修改 monitoring_points 列表
+
+monitoring_points:
+  # ===== 单个点位示例 =====
+  - id: pt_xxxxxxxx                     # 必填, 全局唯一. 建议: pt_<md5前8位>
+    name: 监测点中文名                    # 必填, 显示用
+    location_type: road_intersection     # road_intersection | highway_segment | bridge_deck | tunnel
+    location_input: 道路名或"lat,lon"     # 必填, 首次 add 时输入
+
+    # ===== 坐标 (geocode 后由脚本自动回填) =====
+    lat: null
+    lon: null
+    geocoded: false
+    geocode_source: null                 # amap | nominatim | manual
+    geocode_confidence: null             # 0.0 ~ 1.0
+    geocode_display: null                # 高德返回的完整地址
+
+    # ===== 路面信息 (用户必填, 缺失走兜底但精度降级) =====
+    pavement_color: unknown              # black | gray | light_gray | unknown
+    pavement_age_years: null             # 数字, null 时按 defaults.pavement_age_fallback_years 兜底
+    pavement_age_source: null            # user | gazetteer | default
+    pavement_age_confidence: SPECULATIVE # 🟢 CONFIRMED | 🟡 ASSUMED | 🔴 SPECULATIVE
+    pavement_type: null                  # AC-13 | SMA-13 | AC-16 | OGFC | null
+    road_grade: urban_expressway         # urban_expressway | highway | municipal | bridge
+
+    # ===== 预警阈值 (每次 add 时可配, 默认从 config.yaml 读) =====
+    warning_thresholds:
+      yellow: 55
+      orange: 60
+      red: 65
+
+    # ===== 元数据 =====
+    created_at: 2026-06-30
+    last_updated: 2026-06-30
+    last_query: null
+    last_alert_level: null               # green | yellow | orange | red
+
+  # ===== 更多点位往下追加 =====
+
+# ===== 全局默认 (兜底用) =====
+defaults:
+  high_temp_threshold: 60                # °C
+  temp_unit: C                          # C | F | both
+  pavement_age_fallback_years: 7        # 未知年龄时按"中等老化"兜底
+  warning_levels:
+    green: '<55'
+    yellow: '55-60'
+    orange: '60-65'
+    red: '>=65'
+  forecast_days: 14
+
+# ===== 定时巡查任务 (cron_setup.py 管理) =====
+scheduled_tasks: []
+# - id: daily_chengdu_0800
+#   name: 成都所有点位每日 08:00 巡查
+#   cron: "0 8 * * *"
+#   filter: "city=成都"
+#   alert_only: true                   # 只在触发预警时推, 不推绿警
+#   enabled: true
+
+# ===== 字段填写指引 =====
+# id:        必填。脚本会在 add 时自动生成 "pt_" + md5 前 8 位, 手工添加时唯一即可
+# name:      必填。中文名。卡片标题里直接显示。
+# location_input: 必填。可填道路名(高德 geocode)或"lat,lon"(直接识别)。
+# lat/lon:   首次 query 时由脚本回填, 手工添加可填 null 让脚本自动 geocode。
+# pavement_color: 强烈建议填。black(新铺)=0.92, gray(5-10年)=0.80, light_gray(15+年)=0.65。
+#             填 unknown 时模型置信度自动降为 LOW, 但不阻塞运行。
+# pavement_age_years: 路面使用年数。null 时按 defaults.pavement_age_fallback_years 兜底。
+# pavement_type: AC-13/SMA-13/AC-16/OGFC。null 不影响建模, 仅作元数据。
+# warning_thresholds: 单点阈值, 不写则用 config.yaml 的 default_thresholds。

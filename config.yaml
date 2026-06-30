@@ -1,0 +1,84 @@
+# PaveTherm Sentinel 主配置 (公开参数)
+#
+# ⚠️ 本文件不含任何 API key / 凭证
+# key 必须保存在 ~/.hermes/secrets/pavetherm-sentinel.env
+# 首次安装运行: python3 scripts/install.py
+
+# ===== 地理编码 =====
+geocoding:
+  provider: amap                       # amap | nominatim
+  amap_key: ${PAVETHERM_AMAP_KEY}      # ← 从 env 读
+  amap_web_service: "https://restapi.amap.com/v3/geocode/geo"
+  nominatim_url: "https://nominatim.openstreetmap.org/search"
+  nominatim_user_agent: "PaveTherm-Sentinel/0.4"
+  fallback_to_manual: true             # 失败时允许手动输入经纬度
+
+# ===== 搜索引擎 (可选) =====
+search:
+  tavily_key: ${PAVETHERM_TAVILY_KEY}  # 查道路建成/大修年份
+  tavily_endpoint: "https://api.tavily.com/search"
+
+# ===== 天气数据 (无需 key,Open-Meteo 公开 API) =====
+weather:
+  provider: open-meteo
+  open_meteo_url: "https://api.open-meteo.com/v1/forecast"
+  forecast_days: 14
+  fields:
+    current: [temperature_2m, wind_speed_10m, weather_code, is_day]
+    hourly: [temperature_2m, global_tilted_irradiance, cloud_cover, wind_speed_10m]
+    daily: [temperature_2m_max, temperature_2m_min, sunrise, sunset, precipitation_sum]
+
+# ===== 路表温度模型 (公开学术公式) =====
+pavement_model:
+  radiation_coefficient: 0.030         # α_rad, LTPP/SHRP 经验值
+  color_absorption:
+    black: 0.92
+    gray: 0.80
+    light_gray: 0.65
+    unknown: 0.78
+  age_aging_correction:                # 按路面使用年数给 Δ_age 修正 (JTG 经验)
+    0: 0.0
+    5: 0.5
+    10: 1.0
+    15: 1.2
+    20: 1.0
+  hot_window:
+    start_hour: 11
+    end_hour: 16
+    peak_hour: 14
+
+# ===== 4 级预警阈值 =====
+alert:
+  levels:
+    green: {max: 55, label: "✅ 绿-正常", advice: "路表温度正常,无需采取措施"}
+    yellow: {min: 55, max: 60, label: "⚠️ 黄-注意", advice: "建议加密巡查,关注车辙变化"}
+    orange: {min: 60, max: 65, label: "🟠 橙-警戒", advice: "建议洒水降温,限制重车通行"}
+    red: {min: 65, label: "🔴 红-危险", advice: "立即启动应急预案,封闭高温时段交通"}
+  default_thresholds: {yellow: 55, orange: 60, red: 65}
+
+# ===== 飞书推送目标 (chat_id 从 env 读) =====
+alert_delivery:
+  default: feishu_home
+  feishu_home_chat_id: ${PAVETHERM_FEISHU_CHAT_ID}
+  quiet_hours: {start: 23, end: 7}    # 这段时间不主动推
+  summary_digest: true                 # 多点合并成摘要
+
+# ===== 飞书 lark-cli 路径 =====
+feishu_push:
+  lark_cli: ${PAVETHERM_LARK_CLI}
+
+# ===== 输出策略 =====
+output:
+  temperature_unit: C
+  prefer_both: true                   # 同时输出 °C 和 °F
+  default_view: ask
+  feishu_card_max_points: 20
+  csv_export_dir: "~/.hermes/skills/pavetherm-sentinel/exports"
+  dashboard_dir: "~/.hermes/skills/pavetherm-sentinel/dashboards"
+
+# ===== 飞书多维表格 (云端存储,可选) =====
+lark_bitable:
+  enabled: false
+  app_token: null
+  table_id: null
+  tenant_access_token_env: "LARK_TENANT_ACCESS_TOKEN"
