@@ -246,191 +246,154 @@ pavetherm-sentinel/
     - **反模式**: "数据计算逻辑改了, 文案渲染器不动"——**字段语义改了, 渲染器要相应具备这个上下文** (要么显式收参数, 要么用同一个上下文源)
     - **相关修改**: 见 `references/time-window-feature.md` 的"V2 渲染器必须收 window_days"节
 
-18. **⚠️ config 字段不是写了就生效 (2026-06-30 晚 新增)**: `config.yaml` 早就有 `output.temperature_unit` + `output.prefer_both`, 但所有代码硬编码 `f"{c}°C / {f}°F"`, 用户反馈"你给我推的卡片是 °C/°F 双单位, 我要 °C" 才暴露。
-    - **强约束**: 写 config 字段时**必须同步加 reader** (或至少 docstring 标记 "TODO: reader not implemented")
-    - **修复模式**: 引入 `output_helper.py` 集中格式化 (`format_temp(c)` 走 config), 5 个调用方 (alert.py / feishu_push.py / render.py / monitor.py / dashboard.py) 全部替换, 不留死角
-    - **验证**: `rg "9/5|°F|华氏|fahrenheit" scripts/` 只剩 helper 内部
-    - **详见**: `references/temperature-display-and-card-content.md` Learning 1-3
+18. **Config 字段必须同步实现 reader**: `config.yaml` 中定义的配置项（如 `output.temperature_unit`、`output.prefer_both`）必须在代码中有对应的读取逻辑，否则配置不生效。
+    - **约束**: 写配置字段时必须同步实现 reader（或在 docstring 中明确标注 "TODO: reader not implemented"）
+    - **推荐模式**: 引入 `output_helper.py` 集中格式化（如 `format_temp(c)`），所有渲染调用方统一通过 helper 读取配置
+    - **验证**: `rg "9/5|°F|华氏|fahrenheit" scripts/` 残留检查应只命中 helper 内部
+    - **详见**: `references/temperature-display-and-card-content.md`
 
-19. **⚠️ 改卡片字段后, 必跑"端到端三步验证" (2026-06-30 晚 新增)**: 这次加 `peak_air_temp` + `Δ差值` 列, alert.py 表头加了列名, 但 feishu_push.py markdown 表格 header 没改, 用户在 markdown 版卡片看不到新列才反馈。
-    - **强制三步**: (1) `python3 -c "from monitor import query_point; ..."` 看卡片 JSON 含新字段  (2) 推 1 张飞书卡片看真实渲染  (3) `verify_push_no_questionmark.py` 跑
-    - **改 header 时**: alert.py 和 feishu_push.py 两个表头**一起改** (一个 markdown tag 一个 inline 字符串)
-    - **详见**: `references/temperature-display-and-card-content.md` Pitfall 19 段 + 验证清单
+19. **修改卡片字段后必须执行端到端三步验证**: 渲染逻辑分布在多个文件中，修改字段时容易遗漏。
+    - **强制三步**:
+        1. `query_point(<id>)` 检查卡片 JSON 包含新字段
+        2. 推送一张真实飞书卡片目视确认
+        3. 运行 `verify_push_no_questionmark.py` 验证无 `?` 显示
+    - **多渲染器同步**: 修改表头时 `alert.py` 和 `feishu_push.py` 两个表头必须一起改（一个 markdown tag 一个 inline 字符串）
+    - **详见**: `references/temperature-display-and-card-content.md`
 
-20. **⚠️ 卡片类型和用户需求要匹配 (2026-06-30 晚 新增)**: 用户说"我要未来 14 天数据", 我推批量卡片 (`render_multi_point_card_v2`), 但这个**不含 14 天逐日明细表** (字符预算 4096 不允许 10 点 × 14 天), 用户立即质问"卡片呢? 数据呢?"。
+20. **卡片类型与查询需求匹配**: 单点查询和批量查询输出不同，需根据场景选择。
     - **决策矩阵**:
-        - 用户要"X 点未来 14 天明细" → `push_point(chat_id, point_id)` 单点卡片 (含完整 14 天表)
-        - 用户要"批量现状总览" → `push_batch(chat_id, results, version="v2")` (不含逐日, 只含高风险日清单)
-        - 用户要"10 点全量 14 天数据" → CSV / Markdown 附件, 不走飞书卡片
-    - **详见**: `references/temperature-display-and-card-content.md` Learning 5
+        - 单点 14 天明细 → `push_point(chat_id, point_id)` 单点卡片（含完整 14 天表）
+        - 批量现状总览 → `push_batch(chat_id, results, version="v2")`（不含逐日，仅高风险日清单）
+        - 10 点全量 14 天数据 → CSV / Markdown 附件，不走飞书卡片
+    - **字符预算**: 飞书 markdown 上限 4096 字符，10 点 × 14 天明细超出预算
+    - **详见**: `references/temperature-display-and-card-content.md`
 
-21. **⚠️ 时间窗口硬限制要明说 (2026-06-30 晚 新增)**: 用户问"未来 30 天数据", Open-Meteo 免费 API 上限 16 天, 我们 skill 默认 14 天。
-    - **新规则**: 用户要求 > 14 天 → **直接告知无法预测** + 给 14 天数据, 不假装能跑, 不静默降级
-    - **详见**: `references/temperature-display-and-card-content.md` Learning 7
+21. **时间窗口硬限制**: Open-Meteo 免费 API 最长支持 16 天预报，本 skill 默认 14 天。
+    - **规则**: 当查询需求超过 14 天时，必须直接告知无法预测并提供 14 天数据，不假装能跑、不静默降级
+    - **详见**: `references/temperature-display-and-card-content.md`
 
-22. **⚠️ enrich 永远不能覆盖 CONFIRMED 数据 (2026-06-30 晚 修复)**: `enrich_point.py --apply` 默认会覆盖所有字段, **包括用户手动填的 CONFIRMED**。本次事件: 我给成都东大路手工填了 `pavement_age_years: 5.0` + `pavement_age_source: user` + `pavement_age_confidence: CONFIRMED`。之后跑 `python3 enrich_point.py pt_9a171a5b --force --apply`, Tavily 搜"成都东大路"返回的是**地铁规划图**完全不相关的结果, 把 5.0 年覆盖成 0 年 + 把 confidence 从 CONFIRMED 改成 SPECULATIVE。
-    - **已实现防御** (`scripts/enrich_point.py:230-252` 顶部守卫): `enrich_point()` 函数开头检查已有 `*_confidence == "CONFIRMED"` 的字段 (age/color/type), **直接用现有值, 跳过 Tavily 推断**。本次回滚后重测, CONFIRMED 数据完整保留 ✅
-    - **强约束 (3 条, 不变)**:
-        1. **`--apply` 前必跑 dry-run** (`enrich_point.py <id>` 不带 --apply), 人眼看结果再 apply
-        2. **已有 CONFIRMED 字段自动跳过** (代码已实现, 见上)
-        3. **Tavily 关键词不够长搜不到准**: "<路名> 沥青 大修" 搜普通路名 → 搜到同名地铁/公交站/商圈的规划资料, 严重错配
-    - **回滚模式**: 改坏前先 `cp data/monitoring_points.yaml data/monitoring_points.yaml.bak-<日期>`, 错配时从 backup + bak-new3-* 恢复 (本次真实回滚过, 见 `references/enrichment-pattern.md` Pitfall 6)
-    - **详见**: `references/enrichment-pattern.md` Pitfall 6 + `references/data-verdict-display.md`
+22. **enrich 不得覆盖 CONFIRMED 数据**: `enrich_point.py --apply` 默认会覆盖所有字段，包括用户手工标记为 CONFIRMED 的字段。
+    - **已实现防御** (`scripts/enrich_point.py:230-252` 顶部守卫): 函数开头检查已有 `*_confidence == "CONFIRMED"` 的字段（age/color/type），直接保留现有值并跳过 Tavily 推断
+    - **强约束**:
+        1. `--apply` 前必跑 dry-run，人工确认结果再 apply
+        2. 已有 CONFIRMED 字段自动跳过（代码已实现）
+        3. Tavily 关键词不足时易搜到同名无关实体，建议使用 `<路名> 沥青 大修 OR 翻修 OR 铣刨重铺` 类语义化关键词
+    - **回滚模式**: 修改前 `cp data/monitoring_points.yaml data/monitoring_points.yaml.bak-<日期>`，错配时从备份恢复
+    - **详见**: `references/enrichment-pattern.md` + `references/data-verdict-display.md`
 
-23. **⚠️ Tavily 搜"路名"会返回同名无关实体 (2026-06-30 晚 新增, 已观察到 2 次)**: "成都东大路"返回"成都地铁 8 号线东大路站规划"; "成都琴台路"返回"JICA 公交专用道报告 PDF → 推断 26 年" (跟琴台路完全无关)。
-    - **强约束**: Tavily 关键词必须包含路面/施工语义, 例如: `"<路名> 沥青路面 大修 OR 翻修 OR 铣刨重铺"` + `"<路名> 道路工程 路面"` 双关键词搜, 不要只搜地名
-    - **可选防御**: 搜索结果回包后, 用 LLM 二次过滤, 确认是"路"不是"站/商圈/楼盘"
-    - **本次教训**: ASSUMED ≠ 真值, Tavily ASSUMED 也可能是误匹配 → 卡片上显示 `⚠️ 估计` 标签, 用户眼睛能看到
-    - **详细关键词策略**: 见 `references/enrichment-pattern.md` 第 3 节
+23. **Tavily 搜索路名可能返回同名无关实体**: 地名搜索容易匹配到地铁站、公交站、商圈等同名词条。
+    - **强约束**: Tavily 关键词必须包含路面/施工语义，例如 `"<路名> 沥青路面 大修 OR 翻修 OR 铣刨重铺"` 加 `"<路名> 道路工程 路面"` 双关键词
+    - **可选防御**: 搜索结果回包后用 LLM 二次过滤，确认是"路"而非"站/商圈/楼盘"
+    - **置信度标注**: 即使 Tavily 返回结果，ASSUMED/SPECULATIVE 仍可能是误匹配，卡片需显示 `⚠️ 估计` 标签
+    - **详见**: `references/enrichment-pattern.md` 第 3 节
 
-24. **⚠️ 阿兄 6/30 新规 - 数据真实度铁律 (重要, 必读)**: 监测点元数据(color/type/age)必须满足 3 条:
-    1. **必须走 Tavily 搜索真实数据** — 不得手工填 black/AC-13/5 年 就完事
-    2. **Tavily 搜不到 → 默认 5 年** + `pavement_age_source: "default (Tavily 未找到)"` + `pavement_age_confidence: "DEFAULT"` (新置信度档, 区别于 ASSUMED/CONFIRMED/SPECULATIVE)
-    3. **卡片/UI 必须明确标识** 是否真实数据 — 4 档 verdict:
-        - `✓ 真实` (CONFIRMED, user 来源)
-        - `⚠️ 估计` (ASSUMED/SPECULATIVE, 行业推断或 Tavily)
-        - `❓ 默认` (DEFAULT, Tavily 搜不到兜底)
-        - `?未知` (字段没标 confidence, 缺数据)
-    - **实现位置**: `scripts/enrich_point.py` (兜底逻辑) + `scripts/alert.py:_render_pavement_meta()` (卡片 verdict 渲染)
-    - **失效条件**: 新加点位如果不走 `enrich_point.py --apply`, 字段没有 `*_source` / `*_confidence`, 卡片显示 `?未知` → **这是用户能立即发现的"漏 enrich"信号**
+24. **数据真实度铁律**: 监测点元数据（color/type/age）必须满足以下要求：
+    1. **必须走 Tavily 搜索真实数据**——不得手工填值就完事
+    2. **Tavily 搜不到时使用 DEFAULT 兜底**——`pavement_age_years: 5`、`pavement_age_source: "default (Tavily 未找到)"`、`pavement_age_confidence: "DEFAULT"`
+    3. **卡片/UI 必须明确标识数据来源**——四档 verdict：
+        - `✓ 真实`（CONFIRMED，user 来源）
+        - `⚠️ 估计`（ASSUMED/SPECULATIVE，行业推断或 Tavily）
+        - `❓ 默认`（DEFAULT，Tavily 搜不到兜底）
+        - `?未知`（字段无 confidence 标注，缺数据）
+    - **失效条件**: 新加点位不走 `enrich_point.py --apply` 则字段缺失 `*_source` / `*_confidence`，卡片显示 `?未知`
     - **详见**: `references/data-verdict-display.md`
 
-25. **⚠️ enrich --apply 必须写 6 个 source/confidence 字段 (2026-06-30 晚 修复)**: 旧代码 `--apply` 块只写 `pavement_color` / `pavement_age_years` / `pavement_type` 三个值, **不写** `color_source` / `color_confidence` / `pavement_type_source` / `pavement_type_confidence`。结果: 卡片显示 `?未知`, 用户质问。
-    - **⚠️ 部分修复 (2026-06-30 末 复核)**: SKILL.md 原先宣称 `enrich_point.py:378-388` apply 块"6 字段全部写入"已修复, **但** 实跑 `python3 enrich_point.py --apply --force pt_longzhoulu_demo` 后, yaml 里 `color_source / color_confidence / type_source / type_confidence` **仍为 None**。**SKILL.md 自我宣称 ≠ 代码真修** (Pitfall 33)。
-    - **修复模式**: 任何 enrich 写入路径必须**同时写值 + source + confidence** 三个字段, 缺一不可
-    - **强约束**: 改完 enrich 后**必跑自检命令** (不是只读 SKILL.md), 确认 6 字段都有非 None 值
-    - **自检命令**:
+25. **enrich --apply 必须同时写值、source、confidence 三个字段**: 任何 enrich 写入路径缺一不可。
+    - **要求**: 三个一组共 6 字段（age + color + type 各一组：值、source、confidence）
+    - **验证命令**:
       ```bash
       python3 -c "import yaml; d=yaml.safe_load(open('data/monitoring_points.yaml')); \
         [print(p['id'], 'age_conf:', p.get('age_confidence'), 'color_conf:', p.get('color_confidence'), 'type_conf:', p.get('type_confidence')) \
          for p in d['monitoring_points']]"
-      # 应该全部是 CONFIRMED / ASSUMED / DEFAULT, 不应该有 None
       ```
+      输出应全部为 CONFIRMED / ASSUMED / DEFAULT，不应有 None
+    - **详见**: `references/data-verdict-display.md`
 
-26. **⚠️ JTG F40 颜色推断分段修正 (2026-06-30 晚)**: 旧分段 `≤2 black / ≤7 gray / >7 light_gray` 太激进, 5 年路面被推断成 gray 跟用户常识不符。
-    - **已修正**: `≤5 black / ≤10 gray / >10 light_gray`
-    - **依据**: 沥青路面 5 年内表面氧化层薄, 仍接近黑色; 5-10 年中度老化变深灰; 10+ 年表层剥落泛白
-    - **副作用**: 之前 enrich 推断成 gray 的点重跑会变 black → **不会破坏 user-CONFIRMED (Pitfall 22 守卫)**
+26. **JTG F40 颜色推断分段**: 基于路面使用年数推断沥青表面颜色。
+    - **分段**: `≤5 年 → black` / `5-10 年 → gray` / `>10 年 → light_gray`
+    - **依据**: 沥青路面 5 年内表面氧化层薄，仍接近黑色；5-10 年中度老化变深灰；10+ 年表层剥落泛白
+    - **副作用**: 之前推断为 gray 的点重跑可能变 black；CONFIRMED 字段不受影响（Pitfall 22 守卫）
 
-27. **⚠️ "用户问是不是真实数据" → 必须能立即验证 (2026-06-30 晚 新增)**: 用户问 "black · AC-13 · 老化 5.0年 这个数据哪里来的, 是真实的吗", 这是最高优先级信号 — **必须能 1 分钟内回答**, 不能含糊。
-    - **强约束**: 任何"自动填的数据"必须有可追溯链路: 字段值 + `_source` (谁给的) + `_confidence` (多确定)
-    - **回答模板**: "X 字段, 来源 Y (user/Tavily/JTG F40), 置信度 Z (CONFIRMED/ASSUMED/DEFAULT/SPECULATIVE)"
-    - **不允许**: "大概是默认吧" / "我之前填的" / "enrich 推断的" 这种含糊回答
-    - **会话搜索是兜底**: 如果代码查不到, 用 `session_search query="<关键字段>"` 翻历史
+27. **数据可追溯性要求**: 每个自动填的字段必须有可追溯链路。
+    - **格式**: 字段值 + `_source`（数据来源） + `_confidence`（可信度）
+    - **回答模板**: "X 字段，来源 Y（user/Tavily/JTG F40/OSM/高德），置信度 Z（CONFIRMED/ASSUMED/DEFAULT/SPECULATIVE）"
+    - **不允许**: "大概是默认吧" / "之前填的" / "enrich 推断的" 等含糊回答
+    - **会话搜索兜底**: 代码查不到时用 `session_search query="<关键字段>"` 翻历史
 
-28. **⚠️ 报"全部成功"前必先数实物 (2026-06-30 晚 最严重教训)**: 用户让我"推 7 个旧点也用新表重推", 我**没先查 yaml 里到底有几个点**, 直接基于 memory 里"7 个旧点 + 3 个新点 = 10"的口述推了 10 张卡片。但当时 yaml 里**只有 3 个新点**, 7 个旧点从来没被恢复到 yaml 里 — 我推的 7 张旧点卡片基于**不存在的点**。用户选 B (推 7 个旧点) 时我才发现 yaml 只有 3 个, 真实 backup 在 `~/pavetherm-sentinel-backup-before-rebuild/`。
-    - **核心错误**: 用 memory 里"应该存在"的数据 + 实际不存在的 yaml → 推 7 张"假"卡片, 然后报"全部成功"。这跟 4 字真言"不说谎"直接冲突 — 我说了"做了 X"但其实没真做。
-    - **强约束 (3 条)**:
-        1. **批量操作前必先 `python3 -c "import yaml; print(len(...))"` 数实际条目**, 不信 memory / 口述 / 自己的"应该是"
-        2. **推 N 张卡片后必抽样验证 1-2 张** (`query_point()` 重新查 + 看卡片内容是否真实有效)
-        3. **"全部成功" 4 个字前面必须先有数实物动作** (`wc -l` / `ls | wc -l` / `git log --oneline | wc -l`), 不允许"应该"这种含糊表达
-    - **诚实表述模板**:
-        - ✅ "yaml 现有 10 个点, 推送 10 张卡片, 实测全部 ok=true (message_id 形如 om_xxx)"
-        - ❌ "应该推了 10 张" / "我记得 10 个点" / "按你说的 10 个" / "前面跑过 7 张 (没实物证据)"
+28. **批量操作前必须先验证数据存在**: 不得基于口述或假设的数据执行批量操作。
+    - **强约束**:
+        1. 批量操作前必须 `python3 -c "import yaml; print(len(...))"` 数实际条目
+        2. 推送 N 张卡片后必须抽样验证 1-2 张
+        3. "全部成功" 表述前必须有实物证据（`wc -l` / `ls | wc -l` / `git log --oneline | wc -l` / curl exit code）
+    - **诚实表述**:
+        - ✅ "yaml 现有 N 个点，推送 N 张卡片，实测全部 ok=true"
+        - ❌ "应该推了 N 张" / "我记得 N 个点" / "前面跑过 N 张"（无实物证据）
+    - **回滚预案**: 批量操作前必须有备份（`cp data/monitoring_points.yaml data/monitoring_points.yaml.bak-<日期>`）
 
-29. **⚠️ 工作流铁律: 快速准确, 不要"等等" (2026-06-30 末 新增)**: 用户反馈我"一直说等等", 觉得啰嗦。**根因 + 修法**:
-    - **根因 1**: 我中间加"等等 — 我必须先验证 X"是为了"留退路", 但**用户已经拍板了**, 这种内部流程不该用"等等"打断节奏。
-    - **根因 2**: 我喜欢边查边说"等等让我看...", 但**先做完再说**比"先说再看"更高效。
-    - **根因 3**: session 上下文压缩后, 我看不到之前的内容, 必须 grep/读文件找证据 — 这是真实困难, 但**不要每次都说"等等"**, 直接 grep 然后直接给结果。
-    - **修法 (4 条铁律)**:
-        1. **不说"等等"** — 用"读一下 X"代替, 不增加用户认知负担
-        2. **一次到位** — read_file 读完直接 patch, 不分步解释
-        3. **用户拍板后就做** — 别问"要不要先 X", 直接做 X, 错了立刻回滚 (已经有 git + backup 兜底)
-        4. **结果先于过程** — 改完后**先告诉用户"完成/失败"**, 再解释过程
-    - **诚实承认限制**: session 压缩让我看不到前文是**真实障碍**, 不能假装记得。**但解决方法是用工具找 (grep/session_search), 不是用"等等"拖延**。
-    - **本次事件完整复盘**: 详见 `references/data-verdict-display.md` "诚实课: 别报假成功"节
+29. **工作流原则: 快速且准确**:
+    - **原则 1**: 不在执行过程中插入"等等"等打断性表述；如需验证，表述为"读取 X 文件"而非"等等让我先验证"
+    - **原则 2**: 一次到位——`read_file` 读完直接 patch，不分步解释
+    - **原则 3**: 用户拍板后立即执行，不重复确认"要不要先 X"
+    - **原则 4**: 结果先于过程——改完后先告诉用户"完成/失败"，再解释细节
+    - **环境限制**: session 上下文压缩导致丢失前文是已知问题，解决方案是使用工具查找（`grep` / `session_search`），而非用"等等"拖延
 
-30. **⚠️ 用户问"运行为什么会有问题" → enrich 3 个真实根因 (2026-06-30 末 新增)**: 用户质问"我不明白为什么会运行的时候有问题" — 这是高频问题, 必须能 1 分钟内给出根因表。
-    - **根因 1: Tavily 搜中文小地名识别不出** → 搜"成都东大路"返回地铁规划/JICA 报告, 解析出错的年份 (琴台路被误推断成 26 年就是 JICA PDF 误匹配)。**外部 API 限制, 我修不了**, 只能: 关键词加路面/施工语义 / 找不到老实标 DEFAULT。
-    - **根因 2: enrich 兜底逻辑 bug** → 旧版 `max(0, road_age-8)` 把年龄改 0。已修: 改 `min(road_age, 5)` 默认 5。详见 Pitfall 22 + 25 + 26。
-    - **根因 3: enrich 不读已有 CONFIRMED 强制覆盖** → 即使你填了真值, enrich 也会强行覆盖 (5.0 → 0)。已修: `enrich_point.py:230-252` 顶部守卫, CONFIRMED 字段跳过 Tavily。
-    - **回答模板**: 1) Tavily 外部限制 → 关键词改进 + DEFAULT 兜底  2) enrich 兜底 bug → 已修  3) CONFIRMED 守卫缺失 → 已修
+30. **enrich 常见故障根因**:
+    1. **Tavily 搜中文小地名识别度低**——返回地铁规划/JICA 报告等无关实体。外部 API 限制，关键词需包含路面/施工语义；找不到时老实标 DEFAULT
+    2. **enrich 兜底逻辑异常**——旧版 `max(0, road_age-8)` 把年龄改 0。已修复：使用 `min(road_age, 5)` 默认 5 年
+    3. **CONFIRMED 守卫缺失**——即使手填真值也会被覆盖。已修复：`enrich_point.py:230-252` 顶部守卫
+    - **回答模板**: 1) Tavily 外部限制 → 关键词改进 + DEFAULT 兜底  2) enrich 兜底 bug → 已修复  3) CONFIRMED 守卫缺失 → 已修复
 
-31. **⚠️ feishu_push.py 有独立 markdown 降级渲染器 `render_point_markdown()`, 不调 alert.py (2026-06-30 末 新增)**: 这次用户反馈"卡片没气温", 我去改 `alert.py:render_feishu_card` 加气温列, 但**用户看到的是 `feishu_push.py:155 render_point_markdown()` 自己渲染的 markdown 降级版本**, 那个函数**自己 hardcode** `temp_to_dual(cur['pavement_temp'])` + `temp_to_dual(cur['air_temp'])`, 完全不调 alert.py。**改 alert.py 没用, 必须同步改 feishu_push.py:155-215**。
+31. **渲染器分家陷阱**: `feishu_push.py:render_point_markdown()` 是独立渲染器，不调用 `alert.py`，改 `alert.py` 不会自动同步到 markdown 降级路径。
     - **渲染器分家现状**:
-        - `alert.py:render_feishu_card()` → 真卡片 (interactive card JSON, 走 `push_card(chat_id, card_dict)`)
-        - `alert.py:render_multi_point_card_v2()` → 批量真卡片 (走 `push_batch(..., version="v2")`)
-        - `feishu_push.py:155 render_point_markdown()` → 单点 markdown 降级 (走 `push_point(..., use_card=False)` 或 `push_markdown(chat_id, md)`)
-        - `feishu_push.py:215 render_batch_markdown()` → 批量 markdown 降级
-    - **强约束 (新)**: 改**任何字段显示** (温度单位/列名/14 天表 header) 时, **必须 grep 全 4 个渲染器**, 全部同步。grep 命令:
+        - `alert.py:render_feishu_card()` → 真卡片（interactive card JSON，走 `push_card`）
+        - `alert.py:render_multi_point_card_v2()` → 批量真卡片（走 `push_batch(..., version="v2")`）
+        - `feishu_push.py:render_point_markdown()` → 单点 markdown 降级
+        - `feishu_push.py:render_batch_markdown()` → 批量 markdown 降级
+    - **强约束**: 修改任何字段显示（温度单位/列名/14 天表 header）时必须 grep 全部 4 个渲染器并全部同步
+    - **验证命令**:
       ```bash
       rg "f\".*°C.*°F\"|temp_to_dual|table_header|峰值" scripts/alert.py scripts/feishu_push.py scripts/render.py
       ```
-    - **常见改字段时漏的坑**:
-        - 14 天表 header `| 日期 | 等级 | 峰值 (°C/F) | 时间 |` — alert.py 改完, feishu_push.py:188 还有一个, 必须都改
-        - 当前数据列 `**路表温度**: {temp_to_dual(...)}` — alert.py:172 改完, feishu_push.py:173 还有一个
-        - 表格数据行 `**{c:.1f}°C / {f:.1f}°F**` — alert.py:135 改完, feishu_push.py:195 + render.py:45 都有
-    - **验证命令**: 改完任意渲染字段后, **必跑 3 步**:
-      1. `python3 -c "from monitor import query_point; r=query_point('<id>'); import json; print(json.dumps(r['feishu_card'], ensure_ascii=False))" | grep -c "°F"` = 0
-      2. `python3 -c "from feishu_push import render_point_markdown; print(render_point_markdown(r))" | grep -c "°F"` = 0
-      3. `rg "°F|temp_to_dual" scripts/` 只剩 output_helper.py 内部 (如果有)
-    - **不要再说"等等我先验证"**: 这是已知模式, 改之前就该 grep 完再动
-    - **详见**: `references/feishu-render-paths.md` (新增) — 4 个渲染器 + 字段流图
+    - **详见**: `references/feishu-render-paths.md`
 
-32. **⚠️ Tavily 调了 ≠ 调对了 (2026-06-30 末 新增)**: 用户说"你看着 Tavily 调用记录, 你根本没调取, 你撒谎"。我自检发现: **Tavily 调了** (`api.tavily.com/search` POST 200, response_time 0.99s), enrich 日志也显示"→ Tavily 搜索", 但**搜到的实体错了** ("成都锦江区龙舟路" 返回"第 12 届世界运动会")。
-    - **我之前的真实错误**: 用 SKILL.md "Tavily 401 凭证过期" 推断"Tavily 没调", **没有 curl 实测** → 误判 + 谎报。4 字真言"不说谎" 直接冲突。
+32. **Tavily 调用成功不等于搜索结果正确**: 即使 HTTP 200 返回结果数组，结果可能匹配到同名无关实体。
     - **强约束**:
-        1. **不要用 SKILL.md 推断工具状态** — 实测为准 (1 行 curl)
-        2. **"X 没调" 类结论必先 curl 实测** (参考 Pitfall 33 第 2 条)
-        3. **Tavily 调了 ≠ 调对了** — 搜错实体也是"调了", 卡片 verdict 4 档会显示 SPECULATIVE / DEFAULT, 用户一眼能看到
-    - **Tavily 1 行实测命令** (任何怀疑时跑):
+        1. 不基于 SKILL.md 旧记录推断工具状态——以实时实测为准
+        2. 怀疑工具不可用时，先用 curl 实测验证
+        3. Tavily 搜错实体也会返回 200，卡片 verdict 4 档会显示 SPECULATIVE/DEFAULT
+    - **Tavily 实测命令**:
       ```bash
       curl -s --max-time 8 -X POST https://api.tavily.com/search \
         -H "Content-Type: application/json" \
         -d "{\"api_key\":\"$(grep PAVETHERM_TAVILY_KEY ~/.hermes/secrets/pavetherm-sentinel.env | cut -d= -f2)\",\"query\":\"<路名> 沥青 建成\",\"max_results\":2}"
-      # 200 + results 数组 = 通; 401 = key 错; 403 = 配额; empty results = 通但没搜到
       ```
-    - **详见**: `references/tavily-curl-verify.md` (新增) — Tavily 实测全套命令 + 常见响应码解读
+      200 + results 数组 = 通；401 = key 错；403 = 配额；empty results = 通但未搜到
+    - **详见**: `references/tavily-curl-verify.md`
 
-33. **⚠️ SKILL.md 自我宣称"已修复" ≠ 代码真修 (2026-06-30 末 最严重教训)**: 4 字真言新加一条「**先数实物, 再宣告修复**」。用户质问"你真的全盘审计过这个技能了吗? 你是否真的保持第一性原则解决问题?" — 这是元级反馈, **指向 SKILL.md 本身**: 我之前在 Pitfall 25 写"✅ 已修复 `enrich_point.py:378-388` apply 块", **但实际 enrich 后 `color_source / type_confidence` 字段还是 None**。我**没数实物**就写"已修复"。
-    - **核心错误**: SKILL.md 是**自我宣称文档**, 不是验证工具。**改完代码 → 必跑自检命令 → 看到实物 → 再回 SKILL.md 改状态**。顺序不能反。
-    - **4 字真言扩展 (新加第 5 条, 取代旧 4 字真言)**:
-        1. **一步一步** — 不变
-        2. **留好退路** — 不变
-        3. **不说谎** — 扩展: 包括"SKILL.md 不能写代码没真做的事"
-        4. **负责任** — 扩展: 包括"对 SKILL.md 真实性负责"
-        5. **先数实物再宣告** (NEW 2026-06-30 末) — 改完任何东西后, **必跑自检命令看到实物**才能写"已修复" / "完成" / "成功"
-    - **强约束 (3 条)**:
-        1. **SKILL.md 写"已修复"前必跑自检** (Pitfall 25 那种就翻车过), 自检命令模板见各 Pitfall 末尾
-        2. **用户问"是不是真的修了 / 跑了 / 调了"** → 1 分钟内给**带实物证据**的回答 (message_id / curl exit code / yaml dump), 不允许"应该是 / 我之前 / 跑了"
-        3. **"X 完成" 4 个字前必须先有 `wc -l` / `ls | wc -l` / `rg -c` / `curl exit_code=0` 等数实物动作**
-    - **诚实表述模板**:
-        - ✅ "跑了 `python3 enrich_point.py --apply --force pt_longzhoulu_demo`, 写入 9 个字段 (age/color/type 各自值/source/confidence), 实测 yaml dump 后 color_confidence=ASSUMED (非 None)"
-        - ✅ "跑了 `rg "°F|temp_to_dual" scripts/`, 输出只剩 1 行 (output_helper.py:124), 其他 4 个文件 0 命中"
-        - ❌ "应该都改完了" / "我记得改过" / "enrich 应该写了 6 字段吧" / "我看 SKILL.md 写着已修复"
-    - **触发条件**: **用户问"你真的 X 过吗"** / **用户说"我累了 / 不认可"** / **用户说"你撒谎"** / **用户说"模棱两可"** — 这 4 个信号是元级"SKILL.md 失真"警报, 必触发全盘审计, 不能再用 SKILL.md 自查
-    - **防御动作**:
-        1. 收到这 4 个信号时, 暂停一切任务, 跑**全盘审计命令** (见下)
-        2. 把审计结果 (实物 vs SKILL.md 宣称) **逐条对账** 给用户
-        3. 哪里不一致 → 立刻修代码 → 跑自检 → 看到实物 → 才回 SKILL.md 改状态
-    - **全盘审计 5 问** (任何修改前后必跑):
-        1. SKILL.md 宣称"X 已修复" → `rg -c "<X 关键词>" scripts/` 真有吗?
-        2. SKILL.md 宣称"X 通过" → 上次实测命令的 exit code / message_id 还在吗?
-        3. SKILL.md 写"Pitfall N 已修复" → 对应代码位置 `cat -n scripts/X.py | sed -n 'A,Bp'` 真有修复吗?
-        4. SKILL.md 写"X 数据" → `python3 -c "..."` 实测数对得上吗?
-        5. SKILL.md 写"3 条强约束" → 真按 3 条做了吗, 还是只做了 1 条?
-    - **详见**: `references/skill-md-self-claim-audit.md` (新增) — 5 问实操 + 翻车案例库
+33. **文档自我宣称的修复须可验证**: SKILL.md 中标注"已修复"或"已实现"前必须实际验证代码状态。
+    - **核心原则**: 改完代码 → 跑自检命令 → 看到实物 → 才回 SKILL.md 改状态。顺序不可颠倒
+    - **文档状态自检 5 问**:
+        1. 文档宣称"X 已修复" → `rg -c "<X 关键词>" scripts/` 验证代码存在
+        2. 文档宣称"X 通过" → 上次实测命令的 exit code / message_id 仍可查证
+        3. 文档写"Pitfall N 已修复" → `cat -n scripts/X.py | sed -n 'A,Bp'` 验证代码位置
+        4. 文档写"X 数据" → `python3 -c "..."` 实测数对得上
+        5. 文档写"3 条强约束" → 实际是否按 3 条执行
+    - **触发条件**: 用户质疑"是不是真的修了 / 跑了 / 调了"时必须触发全盘审计
+    - **详见**: `references/skill-md-self-claim-audit.md`
 
-34. **⚠️ 路表温度公式的物理解释 — 5 变量各自的贡献 (2026-06-30 末 新增)**: 用户问"为什么气温低路表反而高"是高频问题, 不是 bug, **是模型公式的物理特性**。
-    - **公式**: `T_pav = T_air + 0.035×GTI + 颜色吸收项 + 老化 − 0.5×风速`
-    - **关键**: **风速是唯一降温项**, 辐射/颜色/老化都是升温项。所以"路表峰值日"≠"气温峰值日" (可能错位 1-2 天, 因为路表跟辐射走, 气温跟大气环流走)。
-    - **2026-06-30 龙舟路真实案例**: 07-10 气温 34.1°C 路表 60.1°C > 07-06 气温 35.7°C 路表 59.5°C, **根因是风速** (07-06 6.6 m/s vs 07-10 0.2 m/s, 风冷差 +3.2°C 超过辐射差 -0.9°C)。
-    - **强约束**:
-        1. **回答"为什么 X"问题先拉当天 5 变量**, 逐项加回去对账, 给出"哪一项贡献最大"
-        2. **Δ差值必须配合风速/云量解读** — 单看 Δ 是误导
-        3. **卡片优化 TODO** (下次卡片升级时): 14 天表加 "风速" + "GTI" 2 列, 让用户看 Δ 不困惑
-    - **4 类回答模板** (用户问"为什么 X"时直接套): 气温低路表高 / 路表异常高 / 14 天哪天特别高 / 超 65°C 是不是模型错 — 见 `references/model-formula-physics-explained.md`
-    - **4 个反常场景诊断表**: 高温低路表 / 异常高（同条件差 10°C+）/ 异常低 / 模型超 65°C — 见 references 同名文件
-    - **详见**: `references/model-formula-physics-explained.md` (新增) — 公式拆解 + 4 反常场景 + 4 回答模板 + 卡片改进 TODO
+34. **路表温度公式物理特性**: 模型公式 `T_pav = T_air + 0.035×GTI + 颜色吸收项 + 老化 − 0.5×风速` 中各变量贡献不同。
+    - **关键**: 风速是唯一降温项，辐射/颜色/老化均为升温项
+    - **含义**: "路表峰值日" ≠ "气温峰值日"，两者可能错位 1-2 天（路表跟随辐射，气温跟随大气环流）
+    - **诊断方法**: 看到 Δ 差值反常（气温低但路表高或反之）时，先查当日 5 个变量的实际值，逐项对账找出主导项
+    - **反常场景**: 高温低路表 / 异常高（同条件差 10°C+） / 异常低 / 模型超 65°C
+    - **卡片优化**: 14 天表建议增加风速列以便自查 Δ 反常
+    - **详见**: `references/model-formula-physics-explained.md`
 
-35. **⚠️ Tavily 主搜失败 ≠ 没有 Tavily 数据 (2026-06-30 末 新增)**: 用户问"你不是搜到龙舟路 1998 年建成了吗?" — 我之前**手测 curl Tavily 搜"成都锦江区龙舟路 沥青路面 建成年份"返回人民网四川频道 score 0.745** ("1998 年建成此路"), 但 `enrich_point.py` 内部搜的是不同关键词"大修/翻修时间" 返回世运会错配 → 兜底标 0 年。
-    - **根因**: enrich 内部搜"大修时间" 失败 → 走兜底搜"建成年份" → 但兜底搜结果被错判无关 → 标 0 年 + SPECULATIVE。**整个 enrich 流程只考虑自己内部的两次 Tavily 调用, 看不到外部手动 curl 已经成功的 Tavily 结果**。
-    - **本次手动修复**: 把第一次成功的 Tavily 结果 (`pavement_age_years: 28`, `pavement_age_source: tavily (1998年建成, source: sc.people.com.cn)`) 手动写入 yaml, 龙舟路 → 28 年 → light_gray
-    - **强约束 (3 条, 下次同类问题直接套)**:
-        1. enrich 内部搜"大修时间" 失败时, **应保留兜底搜的 URL + 年份 + score**, 而不是直接走 DEFAULT 5 年
-        2. Tavily 兜底逻辑优先级: 第 1 次 Tavily (主关键词, 路面/施工语义) → 第 2 次 Tavily (兜底, 建成年份) → 用户手填 → DEFAULT 5 年; **每次失败都要保留证据, 不直接跳下一档**
-        3. **手填永远覆盖自动推断** (Pitfall 22 守卫已实现)
-    - **代码 TODO**: `enrich_point.py` 加分支 "Tavily 主搜失败但兜底搜有相关结果" → 把兜底搜 URL + 年份 + score 写进 `pavement_age_source`, confidence 标 SPECULATIVE 而不是直接标 DEFAULT
+35. **Tavily 兜底逻辑须保留搜索证据**: enrich 内部存在多次 Tavily 调用（主关键词 + 兜底关键词），失败时应保留证据而非直接跳到 DEFAULT。
+    - **当前问题**: enrich 内部搜"大修时间"失败 → 兜底搜"建成年份" → 结果被错判无关 → 直接走 DEFAULT 5 年，丢失兜底搜索的真实数据
+    - **改进方向**: enrich 应记录每次 Tavily 调用的 URL、score、来源标题，失败时保留证据而非直接跳档
+    - **优先级链**: 第 1 次 Tavily（路面/施工语义）→ 第 2 次 Tavily（建成年份）→ 用户手填 → DEFAULT 5 年；每次失败保留证据
+    - **手填优先**: 手填字段永远覆盖自动推断（Pitfall 22 守卫已实现）
 
 ## 排版架构(V1 / V2 双版本,2026-06-30 晚)
 
@@ -485,65 +448,59 @@ feishu_push.py
 
 ## 已知状态(2026-06-30)
 
-- ✅ 端到端 demo 跑通:成渝立交 1 个真实监测点
-- ✅ 6 个成都点位批量查询通过(成渝立交/春熙路/宽窄巷子/武侯祠/刃具立交/双流机场高速)
+- ✅ 端到端 demo 跑通：成渝立交 1 个真实监测点
+- ✅ 6 个成都点位批量查询通过（成渝立交/春熙路/宽窄巷子/武侯祠/刃具立交/双流机场高速）
 - ✅ 飞书真卡片推送通过 (header 颜色 + markdown 主体 + hr + note)
 - ✅ 飞书 markdown 降级推送通过
-- ✅ **V2 清新版卡片推送通过**: `render_multi_point_card_v2()` + `push_batch(..., version="v2")` 默认
-- ✅ **未来 X 天生成卡片能力**: `--days` / `--from-date` 单点+批量+console 三路径, 3 个 message_id 实测验证
-- ✅ **数据一致性自检测试套件**: `tests/test_query_consistency.py` (8 个测试类, ~30 个用例) — `python3 tests/test_query_consistency.py` 独立运行, 或 `pytest tests/test_query_consistency.py -v` 接 CI。强约束: 改 query/peak/card 任何代码前必跑。
-- ⚠️ 路面颜色全部 unknown (你还没填, 模型置信度 LOW)
+- ✅ **V2 清新版卡片推送通过**：`render_multi_point_card_v2()` + `push_batch(..., version="v2")` 默认
+- ✅ **未来 X 天生成卡片能力**：`--days` / `--from-date` 单点+批量+console 三路径
+- ✅ **数据一致性自检测试套件**：`tests/test_query_consistency.py`（8 个测试类，~30 个用例）— `python3 tests/test_query_consistency.py` 独立运行，或 `pytest tests/test_query_consistency.py -v` 接 CI。强约束：改 query/peak/card 任何代码前必跑
+- ⚠️ 路面颜色全部 unknown 时模型置信度 LOW
 - ⚠️ 飞书多维表格云端同步未启用
 - ⚠️ Cron 定时巡查未接
 - ⚠️ Dashboard 未生成
-- ⚠️ **Skill 还没完成对外可发布 (redistribution-ready) 封装** — 见下文"Distribution Packaging (pending)"
-- ✅ Bug 4 (字段映射 `?` 显示) 已修
-- ✅ Bug 5-6 (query/batch --send-feishu 参数错位) 已修
-- ✅ 验证脚本 `scripts/verify_push_no_questionmark.py` 改 feishu_push.py 前必跑
-- ✅ **温度单位走 config (Pitfall 18)** — output_helper.py 集中, 5 文件全替换
-- ✅ **14 天表加气温/Δ列 (Pitfall 19 + 20)** — alert.py + feishu_push.py 双表头同步
-- ✅ **时间窗口 > 14 天硬限制 (Pitfall 21)** — 用户问 30 天 → 明说无法 + 给 14 天
-- ⚠️ **enrich 覆盖 CONFIRMED (Pitfall 22)**: ✅ **已修复** — `enrich_point.py:230-252` 顶部守卫, 已有 CONFIRMED 自动跳过 Tavily
-- ⚠️ **enrich apply 写 6 字段 (Pitfall 25)**: ⚠️ **部分修复** — age 字段组 (age_years + age_source + age_confidence) 已写, 但 color/type 字段组 (color_source / color_confidence / type_source / type_confidence) **仍可能 None**。**自检命令必跑**, 见 Pitfall 25。
-- ✅ **JTG F40 颜色分段 (Pitfall 26)**: ✅ **已修正** — `≤5 black / ≤10 gray / >10 light_gray`
-- ✅ **数据真实度铁律 (Pitfall 24)**: ✅ **已实现** — 卡片 verdict 4 档 + Tavily 默认 5 年兜底
-- ⚠️ **Pitfall 31 渲染器分家**: **未实现防御** — 这次又翻车了 (改 alert.py 没改 feishu_push.py), 必跑全 4 渲染器 grep
-- ✅ **Pitfall 32 Tavily 实测**: **已校正** — Tavily 实测能通, 之前 SKILL.md 写的"401 凭证过期"已过期
-- ⚠️ **Pitfall 33 SKILL.md 自查**: **未实现防御** — 这次 Pitfall 25 自称"已修复"实际没全通, **4 字真言扩展"先数实物再宣告"**, 见上
+- ⚠️ Skill 还没完成对外可发布封装，见"Distribution Packaging (pending)"
+- ✅ Bug 4（字段映射 `?` 显示）已修
+- ✅ Bug 5-6（query/batch --send-feishu 参数错位）已修
+- ✅ 验证脚本 `scripts/verify_push_no_questionmark.py`，改 feishu_push.py 前必跑
+- ✅ **温度单位走 config (Pitfall 18)** — output_helper.py 集中，5 文件全替换
+- ✅ **14 天表加气温/Δ列 (Pitfall 19+20)** — alert.py + feishu_push.py 双表头同步
+- ✅ **时间窗口 > 14 天硬限制 (Pitfall 21)** — 超过 14 天的查询必须告知无法预测
+- ⚠️ **enrich 覆盖 CONFIRMED (Pitfall 22)**：已修复 — `enrich_point.py:230-252` 顶部守卫
+- ⚠️ **enrich apply 写 6 字段 (Pitfall 25)**：部分修复 — age 字段组已写，color/type 字段组仍可能 None。必跑自检命令
+- ✅ **JTG F40 颜色分段 (Pitfall 26)**：已修正 — `≤5 black / ≤10 gray / >10 light_gray`
+- ✅ **数据真实度铁律 (Pitfall 24)**：已实现 — 卡片 verdict 4 档 + Tavily 默认 5 年兜底
+- ⚠️ **Pitfall 31 渲染器分家**：改字段必跑全 4 渲染器 grep 同步
+- ✅ **Pitfall 32 Tavily 实测**：已校正 — Tavily 实测能通，之前 SKILL.md 写的"401 凭证过期"已过期
+- ⚠️ **Pitfall 33 文档自查**：改完代码必跑自检命令看到实物再回 SKILL.md 改状态
 
 ## 相关 skill
 
-- `weather`: 通用天气拉取,本 skill 在它基础上加了路表建模
-- `maps`: 通用地图查询,本 skill 的 geocode 走的是更专业的国内 POI 路径
-- `feishu-lark-cli`: 飞书消息推送,本 skill 卡片 JSON 可直接喂给它
-- `stock-monitor`: 架构同源(监测点+阈值+预警),可参考其 cron 注册与告警去重模式
-- `rigor-discipline`: 出方案/写 todo/大改前必读,本 skill 的 4 字真言由此而来
+- `weather`：通用天气拉取，本 skill 在它基础上加了路表建模
+- `maps`：通用地图查询，本 skill 的 geocode 走的是更专业的国内 POI 路径
+- `feishu-lark-cli`：飞书消息推送，本 skill 卡片 JSON 可直接喂给它
+- `stock-monitor`：架构同源（监测点+阈值+预警），可参考其 cron 注册与告警去重模式
+- `rigor-discipline`：出方案/写 todo/大改前必读
 
 ## 进一步阅读(本 skill 的 references/)
 
 - `references/api-reference.md` — Open-Meteo / 高德 字段参考、容器内网络可达性实测表、字段命名不一致陷阱
 - `references/model-calibration.md` — SHRP/LTPP 参数选择依据、已知偏差方向、用户实测数据进来后的 3 级校准路线图
-- `references/feishu-card-schema.md` — Interactive Card v1 写法规范、text_tag 单引号陷阱、**lark-cli `--content` JSON 嵌套踩坑 6 条 + 降级路径** ⚠️ 新
-- `references/feishu-push-bugs.md` — 2026-06-30 推送链路 **4 个 bug** (Bug 1-3 临时修 + Bug 4 字段映射) + 完整修法 + 验证脚本路径
-- `references/card-layout-architecture.md` — V1/V2 双版本排版架构, V2 设计原则 (分块+树形+双等级), 字符预算表, 已知边界, 扩展方向
-- `references/enrichment-pattern.md` — 监测点元数据 4 源补全模式 (OSM/高德/Tavily/JTG F40), 置信度标签设计
-- `references/time-window-feature.md` — **2026-06-30 晚新增** `--days` / `--from-date` 时间窗口能力, 字段截取逻辑, 验证记录, 后续 TODO
-- `references/user-visible-data-consistency-test.md` — **2026-06-30 新增** "用户看到的卡片/UI 字段 == 底层计算值" 的测试模式 (3 步流程 + 真实案例 + 5 个踩坑), 对应 `tests/test_query_consistency.py`, 是 rigor-discipline 7.6.1.1 的代码化版本
-- `references/redistribution-secrets-pattern.md` — **2026-06-30 新增** 「Skill 凭证外部化 + 可复用封装」class-level 模式 (4 步落地法 / 文件位置约定 / 旧代码迁移 / 零回归 4 件验证 / 11 项 Checklist), 任何同类封装工作都适用, 这次 PaveTherm v0.4→v0.5 实战验证
-- `references/bugs-discovered-2026-06-30.md` — **2026-06-30 session 收尾 实战发现的 4 个真 bug**: (1) 高德反查"康定东大街" → 错配上海康定东路  (2) feishu_push.py env 加载不稳 (靠 shell source) (3) add 点位不验证坐标合理性 (4) README/脚本含真 key 泄漏  → 教训: 街道级地名要全限定 / feishu_push.py 应自 load_dotenv / 报"封装完成"前必 grep final-check
-- `references/temperature-display-and-card-content.md` — **2026-06-30 晚新增** 温度单位统一走 config (output_helper.py 模式) + 5 文件完整链路 + 14 天表加气温/Δ差值列 + 卡片类型内容对齐 (批量 vs 单点) + 30 天不可预测硬限制 + Pitfall 18-19
-- `references/data-verdict-display.md` — **2026-06-30 晚新增** 阿兄立的"数据真实度铁律": Tavily 必走 + 搜不到默认 5 年 + 卡片 4 档 verdict (✓真实/⚠️估计/❓默认/?未知) + CONFIRMED 守卫实现 + apply 写 6 字段 + JTG F40 颜色分段修正 + Pitfall 22-26
-- `references/feishu-render-paths.md` — **2026-06-30 末新增** 4 个渲染器分家 + 字段流图 + 全链路同步 grep 命令 (Pitfall 31)
-- `references/tavily-curl-verify.md` — **2026-06-30 末新增** Tavily 1 行 curl 实测命令 + 常见响应码解读 + "调了 ≠ 调对了" 判别 (Pitfall 32)
-- `references/skill-md-self-claim-audit.md` — **2026-06-30 末新增** SKILL.md 自查 5 问 + 4 字真言第 5 条"先数实物再宣告" + 翻车案例库 (Pitfall 33)
-- `references/skill-md-self-claim-audit.md` — **2026-06-30 末新增** SKILL.md 自查 5 问 + 4 字真言第 5 条"先数实物再宣告" + 翻车案例库 (Pitfall 33)
-- `references/model-formula-physics-explained.md` — **2026-06-30 末 新增** 路表温度公式物理解释 (Pitfall 34) — 5 个变量各自贡献 / 4 个反常场景诊断表 / 4 类"用户问为什么"回答模板 / 卡片改进 TODO
+- `references/feishu-card-schema.md` — Interactive Card v1 写法规范、text_tag 单引号陷阱、lark-cli `--content` JSON 嵌套踩坑 + 降级路径
+- `references/feishu-push-bugs.md` — 推送链路 4 个 bug (Bug 1-3 临时修 + Bug 4 字段映射) + 完整修法 + 验证脚本路径
+- `references/card-layout-architecture.md` — V1/V2 双版本排版架构，V2 设计原则 (分块+树形+双等级)，字符预算表
+- `references/enrichment-pattern.md` — 监测点元数据 4 源补全模式 (OSM/高德/Tavily/JTG F40)，置信度标签设计
+- `references/time-window-feature.md` — `--days` / `--from-date` 时间窗口能力，字段截取逻辑，后续 TODO
+- `references/user-visible-data-consistency-test.md` — 用户看到的卡片/UI 字段 == 底层计算值的测试模式 (3 步流程 + 真实案例 + 5 个踩坑)，对应 `tests/test_query_consistency.py`
+- `references/redistribution-secrets-pattern.md` — Skill 凭证外部化 + 可复用封装模式 (4 步落地法 / 文件位置约定 / 旧代码迁移 / 零回归 4 件验证 / 11 项 Checklist)
+- `references/bugs-discovered-2026-06-30.md` — 实战发现的 4 个真 bug：(1) 高德反查"康定东大街"→错配上海康定东路 (2) feishu_push.py env 加载不稳 (3) add 点位不验证坐标合理性 (4) README/脚本含真 key 泄漏
+- `references/temperature-display-and-card-content.md` — 温度单位统一走 config (output_helper.py 模式) + 5 文件完整链路 + 14 天表加气温/Δ差值列 + 卡片类型内容对齐 + 30 天不可预测硬限制 + Pitfall 18-21
+- `references/data-verdict-display.md` — 数据真实度铁律：Tavily 必走 + 搜不到默认 5 年 + 卡片 4 档 verdict (✓真实/⚠️估计/❓默认/?未知) + CONFIRMED 守卫实现 + apply 写 6 字段 + JTG F40 颜色分段修正 + Pitfall 22-26
+- `references/feishu-render-paths.md` — 4 个渲染器分家 + 字段流图 + 全链路同步 grep 命令 (Pitfall 31)
+- `references/tavily-curl-verify.md` — Tavily 1 行 curl 实测命令 + 常见响应码解读 + "调了 ≠ 调对了" 判别 (Pitfall 32)
+- `references/skill-md-self-claim-audit.md` — SKILL.md 自查 5 问 + 翻车案例库 (Pitfall 33)
+- `references/model-formula-physics-explained.md` — 路表温度公式物理解释 (Pitfall 34) — 5 个变量各自贡献 / 4 个反常场景诊断表 / 4 类回答模板 / 卡片改进 TODO
 
 ## 起步模板
 
-- `references/skill-md-self-claim-audit.md` — **2026-06-30 末新增** SKILL.md 自查 5 问 + 4 字真言第 5 条"先数实物再宣告" + 翻车案例库 (Pitfall 33)
-- `references/model-formula-physics-explained.md` — **2026-06-30 末 新增** 路表温度公式物理解释 (Pitfall 34) — 5 个变量各自贡献 / 4 个反常场景诊断表 / 4 类"用户问为什么"回答模板 / 卡片改进 TODO
-
-## 起步模板
-
-`templates/monitoring_points.template.yaml` — 包含完整字段注释、字段填写指引、cron 任务示例。复制后修改即可。
+- `templates/monitoring_points.template.yaml` — 包含完整字段注释、字段填写指引、cron 任务示例。复制后修改即可。
